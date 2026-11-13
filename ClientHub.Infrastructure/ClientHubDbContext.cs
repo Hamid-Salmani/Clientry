@@ -1,0 +1,49 @@
+using ClientHub.Application;
+using ClientHub.Domain;
+using Microsoft.EntityFrameworkCore;
+
+namespace ClientHub.Infrastructure;
+
+public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> options, IRequestScope scope)
+    : DbContext(options)
+{
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<Invitation> Invitations => Set<Invitation>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<Milestone> Milestones => Set<Milestone>();
+    public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
+    public DbSet<Comment> Comments => Set<Comment>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
+        modelBuilder.Entity<Payment>().HasIndex(x => x.StripePaymentIntentId).IsUnique();
+        modelBuilder.Entity<Client>().HasMany(x => x.Users).WithOne(x => x.Client)
+            .HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Project>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+        modelBuilder.Entity<Milestone>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+        modelBuilder.Entity<ProjectFile>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+        modelBuilder.Entity<Comment>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+        modelBuilder.Entity<Invoice>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+        modelBuilder.Entity<InvoiceLineItem>().HasQueryFilter(x =>
+            !scope.IsClient || (x.Invoice != null && x.Invoice.ClientId == scope.ClientId));
+        modelBuilder.Entity<Payment>().HasQueryFilter(x =>
+            !scope.IsClient || (x.Invoice != null && x.Invoice.ClientId == scope.ClientId));
+        modelBuilder.Entity<Notification>().HasQueryFilter(x =>
+            !scope.IsClient || x.UserId == scope.UserId);
+        modelBuilder.Entity<ActivityLog>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+        modelBuilder.Entity<Invoice>().Ignore(x => x.Total);
+        modelBuilder.Entity<InvoiceLineItem>().Property(x => x.UnitPrice).HasPrecision(18, 2);
+        modelBuilder.Entity<InvoiceLineItem>().Property(x => x.Quantity).HasPrecision(18, 2);
+        modelBuilder.Entity<InvoiceLineItem>().HasOne(x => x.Invoice).WithMany(x => x.Lines)
+            .HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Payment>().HasOne(x => x.Invoice).WithMany(x => x.Payments)
+            .HasForeignKey(x => x.InvoiceId).OnDelete(DeleteBehavior.Restrict);
+    }
+}

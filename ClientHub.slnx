@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="ClientHub.Api/ClientHub.Api.csproj" />
+  <Project Path="ClientHub.Application/ClientHub.Application.csproj" />
+  <Project Path="ClientHub.Domain/ClientHub.Domain.csproj" />
+  <Project Path="ClientHub.Infrastructure/ClientHub.Infrastructure.csproj" />
+  <Project Path="ClientHub.Tests/ClientHub.Tests.csproj" />
+</Solution>
