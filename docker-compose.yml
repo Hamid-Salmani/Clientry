@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__ClientHub: "Data Source=/data/clienthub.db"
+      Jwt__SigningKey: "${JWT_SIGNING_KEY:-local-demo-signing-key-change-before-use-123}"
+      Stripe__SecretKey: "${STRIPE_SECRET_KEY:-}"
+      Stripe__WebhookSecret: "${STRIPE_WEBHOOK_SECRET:-}"
+      Storage__Path: /data/files
+      Cors__Origins__0: http://localhost:5173
+    volumes:
+      - clienthub-data:/data
+    ports:
+      - "5082:8080"
+    depends_on:
+      - mailpit
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_STRIPE_PUBLISHABLE_KEY: "${VITE_STRIPE_PUBLISHABLE_KEY:-}"
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  clienthub-data:
