@@ -1,8 +1,11 @@
 using ClientHub.Application;
+using ClientHub.Api.Services;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ClientHub.Tests;
 
@@ -95,5 +98,76 @@ public sealed class DomainAndIsolationTests
         Assert.False(await tenant.Invoices.AnyAsync(x => x.Id == invoiceB.Id));
     }
 
+    [Fact]
+    public async Task DemoInitializationRepairsExistingClientCredentialsAndUnlocksThem()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var services = new ServiceCollection()
+            .AddDbContext<ClientHubDbContext>(options => options.UseSqlite(connection))
+            .AddScoped<IRequestScope>(_ => new TestScope(null, null, false))
+            .AddScoped<IFileStorage, UnusedFileStorage>()
+            .BuildServiceProvider();
+
+        var hasher = new PasswordHasher<User>();
+        var userA = new User
+        {
+            Email = "clienta@demo.com", FullName = "Client A", Role = UserRole.Client,
+            PasswordHash = "", FailedLoginAttempts = 2
+        };
+        userA.PasswordHash = hasher.HashPassword(userA, "old-password");
+        var userB = new User
+        {
+            Email = "clientb@demo.com", FullName = "Client B", Role = UserRole.Client,
+            PasswordHash = "", LockedUntil = DateTime.UtcNow.AddMinutes(10)
+        };
+        userB.PasswordHash = hasher.HashPassword(userB, "old-password");
+        var unrelatedUser = new User
+        {
+            Email = "other@example.com", FullName = "Other User", Role = UserRole.Client,
+            PasswordHash = ""
+        };
+        unrelatedUser.PasswordHash = hasher.HashPassword(unrelatedUser, "unchanged-password");
+        var unrelatedHash = unrelatedUser.PasswordHash;
+
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ClientHubDbContext>();
+            await db.Database.MigrateAsync();
+            db.Users.AddRange(userA, userB, unrelatedUser);
+            await db.SaveChangesAsync();
+        }
+
+        await DemoData.InitializeAsync(services);
+
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ClientHubDbContext>();
+            var users = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.Email);
+            foreach (var email in new[] { "clienta@demo.com", "clientb@demo.com" })
+            {
+                var user = users[email];
+                Assert.NotEqual(PasswordVerificationResult.Failed,
+                    hasher.VerifyHashedPassword(user, user.PasswordHash, "DemoPass!234"));
+                Assert.Equal(0, user.FailedLoginAttempts);
+                Assert.Null(user.LockedUntil);
+            }
+
+            Assert.Equal(unrelatedHash, users["other@example.com"].PasswordHash);
+        }
+    }
+
     private sealed record TestScope(Guid? ClientId, Guid? UserId, bool IsClient) : IRequestScope;
+
+    private sealed class UnusedFileStorage : IFileStorage
+    {
+        public Task<string> SaveAsync(Stream content, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("File storage is not used by this test.");
+
+        public Task<Stream> OpenReadAsync(string storedPath, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("File storage is not used by this test.");
+
+        public Task DeleteAsync(string storedPath, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("File storage is not used by this test.");
+    }
 }
