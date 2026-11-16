@@ -76,7 +76,9 @@ function App() {
   const [user, setUser] = useState<User | null>(null)
   const [email, setEmail] = useState('clientA@demo.com')
   const [password, setPassword] = useState('DemoPass!234')
+  const [fullName, setFullName] = useState('')
   const [loginError, setLoginError] = useState('')
+  const [isRegisterMode, setIsRegisterMode] = useState(false)
   const [activePage, setActivePage] = useState('Overview')
   const [openPopover, setOpenPopover] = useState<'search' | 'notifications' | 'workspace' | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -191,8 +193,25 @@ function App() {
       sessionStorage.setItem('clienthub-token', result.accessToken)
       setUser({ name: result.name, role: result.role })
       setToken(result.accessToken)
+      setIsRegisterMode(false)
     } catch (reason) {
       setLoginError(reason instanceof Error ? reason.message : 'Sign in failed.')
+    }
+  }
+
+  async function registerUser(event: FormEvent) {
+    event.preventDefault()
+    setLoginError('')
+    try {
+      const result = await request<{ accessToken: string; name: string; role: User['role'] }>('/auth/register', '', {
+        method: 'POST', body: JSON.stringify({ email, password, fullName }),
+      })
+      sessionStorage.setItem('clienthub-token', result.accessToken)
+      setUser({ name: result.name, role: result.role })
+      setToken(result.accessToken)
+      setIsRegisterMode(false)
+    } catch (reason) {
+      setLoginError(reason instanceof Error ? reason.message : 'Account creation failed.')
     }
   }
 
@@ -240,7 +259,19 @@ function App() {
   }
 
   const greeting = useMemo(() => user?.name.split(' ')[0] ?? 'there', [user])
-  if (!token || !user) return <Login email={email} setEmail={setEmail} password={password} setPassword={setPassword} onSubmit={logIn} error={loginError} />
+  if (!token || !user) return <Login
+    email={email}
+    setEmail={setEmail}
+    password={password}
+    setPassword={setPassword}
+    fullName={fullName}
+    setFullName={setFullName}
+    setIsRegisterMode={setIsRegisterMode}
+    onSubmit={isRegisterMode ? registerUser : logIn}
+    onToggleMode={() => { setIsRegisterMode((current) => !current); setLoginError('') }}
+    isRegisterMode={isRegisterMode}
+    error={loginError}
+  />
 
   return (
     <div className="app-shell">
@@ -321,22 +352,30 @@ function App() {
   )
 }
 
-function Login({ email, setEmail, password, setPassword, onSubmit, error }: {
+function Login({ email, setEmail, password, setPassword, fullName, setFullName, onSubmit, onToggleMode, isRegisterMode, setIsRegisterMode, error }: {
   email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void
-  onSubmit: (event: FormEvent) => void; error: string
+  fullName: string; setFullName: (value: string) => void; onSubmit: (event: FormEvent) => void
+  onToggleMode: () => void; isRegisterMode: boolean; setIsRegisterMode: (value: boolean) => void; error: string
 }) {
   return <main className="login-page">
     <section className="login-card">
       <div className="brand login-brand"><div className="brand-mark">c</div><span>clientry</span></div>
-      <div className="login-copy"><div className="eyebrow">YOUR WORK, IN ONE PLACE</div><h1>Welcome back.</h1><p>Sign in to pick up where you left off.</p></div>
+      <div className="login-copy"><div className="eyebrow">YOUR WORK, IN ONE PLACE</div><h1>{isRegisterMode ? 'Create your account.' : 'Welcome back.'}</h1><p>{isRegisterMode ? 'Set up your workspace and start collaborating.' : 'Sign in to pick up where you left off.'}</p></div>
       <form className="login-form" onSubmit={onSubmit}>
+        {isRegisterMode && <>
+          <label htmlFor="fullName">Full name</label>
+          <input id="fullName" type="text" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+        </>}
         <label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
-        <div className="password-label"><label htmlFor="password">Password</label><span>Demo: DemoPass!234</span></div>
-        <input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+        <div className="password-label"><label htmlFor="password">Password</label><span>{isRegisterMode ? 'Use 8+ characters' : 'Demo: DemoPass!234'}</span></div>
+        <input id="password" type="password" autoComplete={isRegisterMode ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} required />
         {error && <div className="login-error" role="alert">{error}</div>}
-        <button className="primary-button login-submit" type="submit">Sign in <Icon name="arrow" /></button>
+        <button className="primary-button login-submit" type="submit">{isRegisterMode ? 'Create account' : 'Sign in'} <Icon name="arrow" /></button>
       </form>
-      <div className="login-demo"><span>Try a demo workspace</span><div><button onClick={() => { setEmail('clientA@demo.com'); setPassword('DemoPass!234') }}>Client portal</button><button onClick={() => { setEmail('admin@demo.com'); setPassword('DemoPass!234') }}>Agency admin</button></div></div>
+      <button className="text-button login-toggle" type="button" onClick={onToggleMode}>
+        {isRegisterMode ? 'Already have an account? Sign in' : 'Need an account? Create one'}
+      </button>
+      <div className="login-demo"><span>Try a demo workspace</span><div><button type="button" onClick={() => { setEmail('clientA@demo.com'); setPassword('DemoPass!234'); setIsRegisterMode(false) }}>Client portal</button><button type="button" onClick={() => { setEmail('admin@demo.com'); setPassword('DemoPass!234'); setIsRegisterMode(false) }}>Agency admin</button></div></div>
       <p className="login-footer">Secure client collaboration, made simple.</p>
     </section>
     <aside className="login-art" aria-hidden="true"><div className="art-glow" /><div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" /><div className="art-card"><div className="art-card-head"><span className="art-dot" /><span>PROJECT OVERVIEW</span><span>•••</span></div><strong>Brand identity refresh</strong><small>Northstar Studio · Due Dec 12</small><div className="art-progress"><i /></div><div className="art-progress-label"><span>Project progress</span><b>50%</b></div><div className="art-checks"><span>✓ &nbsp; Discovery & strategy</span><span>✓ &nbsp; Visual directions</span><span className="check-pending">◌ &nbsp; Identity system</span></div></div><div className="art-note"><span className="note-avatar">A</span><div><strong>Alex Morgan</strong><p>The first visual directions are ready for review.</p></div><span className="note-time">now</span></div><div className="art-stamp">Thoughtfully<br />connected.</div></aside>
