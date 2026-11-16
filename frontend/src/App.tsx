@@ -85,6 +85,12 @@ function App() {
   const [notificationsSeen, setNotificationsSeen] = useState(false)
   const [workspaceUpdates, setWorkspaceUpdates] = useState(() => localStorage.getItem('clientry-workspace-updates') !== 'false')
   const [invoiceReminders, setInvoiceReminders] = useState(() => localStorage.getItem('clientry-invoice-reminders') !== 'false')
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const savedTheme = localStorage.getItem('clientry-theme')
+    return savedTheme === 'light' || savedTheme === 'dark'
+      ? savedTheme
+      : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  })
   const [creatingProject, setCreatingProject] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -102,6 +108,11 @@ function App() {
 
   const admin = user?.role === 'Admin'
   const workspaceName = admin ? 'Studio North' : 'Northstar Studio'
+  const changeTheme = (lightMode: boolean) => {
+    const nextTheme = lightMode ? 'light' : 'dark'
+    localStorage.setItem('clientry-theme', nextTheme)
+    setTheme(nextTheme)
+  }
   const navigateTo = (page: string) => {
     setActivePage(page)
     setSelectedProject(null)
@@ -128,6 +139,11 @@ function App() {
   useEffect(() => {
     if (openPopover === 'search') searchInputRef.current?.focus()
   }, [openPopover])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+
   const loadData = useCallback(async (authToken: string, currentUser: User) => {
     setLoading(true)
     setError('')
@@ -339,7 +355,7 @@ function App() {
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} />
           ) : activePage === 'Settings' ? (
-            <Settings workspaceName={workspaceName} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => { setWorkspaceUpdates(enabled); localStorage.setItem('clientry-workspace-updates', String(enabled)) }} onInvoiceRemindersChange={(enabled) => { setInvoiceReminders(enabled); localStorage.setItem('clientry-invoice-reminders', String(enabled)) }} />
+            <Settings workspaceName={workspaceName} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => { setWorkspaceUpdates(enabled); localStorage.setItem('clientry-workspace-updates', String(enabled)) }} onInvoiceRemindersChange={(enabled) => { setInvoiceReminders(enabled); localStorage.setItem('clientry-invoice-reminders', String(enabled)) }} />
           ) : activePage === 'Account' ? (
             <Account user={user} workspaceName={workspaceName} onSignOut={signOut} />
           ) : (
@@ -450,17 +466,20 @@ function NotificationsPopover({ admin, projects, invoices, activity, workspaceUp
   </div>
 }
 
-function Settings({ workspaceName, workspaceUpdates, invoiceReminders, onWorkspaceUpdatesChange, onInvoiceRemindersChange }: {
+function Settings({ workspaceName, lightMode, onLightModeChange, workspaceUpdates, invoiceReminders, onWorkspaceUpdatesChange, onInvoiceRemindersChange }: {
   workspaceName: string
+  lightMode: boolean
+  onLightModeChange: (enabled: boolean) => void
   workspaceUpdates: boolean
   invoiceReminders: boolean
   onWorkspaceUpdatesChange: (enabled: boolean) => void
   onInvoiceRemindersChange: (enabled: boolean) => void
 }) {
   return <div className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>Settings<span className="heading-period">.</span></h1><p>Choose how you’d like to keep up with {workspaceName}.</p></div></div>
+    <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>Settings<span className="heading-period">.</span></h1><p>Choose how you’d like to use {workspaceName}.</p></div></div>
     <section className="panel settings-panel">
-      <div className="panel-heading"><div><h2>Notifications</h2><p>Preferences are saved in this browser.</p></div><span className="settings-badge">PERSONAL</span></div>
+      <div className="panel-heading"><div><h2>Appearance & notifications</h2><p>Preferences are saved in this browser.</p></div><span className="settings-badge">PERSONAL</span></div>
+      <PreferenceToggle title="Light mode" description="Use a bright color palette throughout the workspace." checked={lightMode} onChange={onLightModeChange} />
       <PreferenceToggle title="Workspace updates" description="Show project and activity updates in your notification menu." checked={workspaceUpdates} onChange={onWorkspaceUpdatesChange} />
       <PreferenceToggle title="Invoice reminders" description="Keep upcoming and overdue invoices on your radar." checked={invoiceReminders} onChange={onInvoiceRemindersChange} />
     </section>
