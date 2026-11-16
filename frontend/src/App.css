@@ -411,41 +411,40 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
-@media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; }
-  body, .app-shell, .main-panel { background: #171923; color: #e4e6ed; }
-  .sidebar, .topbar, .panel, .stat-card, .project-row, .payment-modal, .create-project-form input, .create-project-form select, .create-project-form textarea, .login-page { background: #20232e; }
-  .sidebar, .topbar, .panel, .stat-card, .workspace-switch, .profile, .project-row, .invoice-row, .invoice-table-row, .file-row, .milestone-list, .milestone, .comment-form, .full-panel { border-color: #303442; }
-  .brand, h1, .panel-heading h2, .stat-card > strong, .project-info strong, .invoice-row-price > strong, .invoice-number strong, .invoice-table-row > strong, .client-details strong, .milestone-copy strong, .comment-body strong { color: #e4e6ed; }
-  .page-heading p, .panel-heading p, .project-info > span, .stat-card > small, .invoice-row-info span, .client-details span, .milestone-copy span, .comment-body p { color: #a3a8b7; }
-  .nav-item:hover, .nav-item.active { background: #303149; color: #b6b7ff; }
-  .nav-item { color: #b2b5c2; }
-  .workspace-meta strong, .profile-meta strong, .breadcrumbs strong { color: #d7d9e2; }
-  .profile-meta span, .workspace-meta span, .breadcrumbs, .invoice-table-head, .invoice-table-row { color: #a0a5b3; }
-  .workspace-switch, .popover, .search-result, .notification-item { background: #252834; color: #d9dbe4; }
-  .workspace-switch:hover, .workspace-switch.open, .search-result:hover, .notification-item:hover { background: #2b2e3b; }
-  .popover { border-color: #373a4b; }
-  .popover-heading strong, .popover-title strong, .search-result strong, .notification-copy strong, .preference-row strong, .settings-workspace strong, .account-identity h2, .account-detail strong { color: #e0e2e9; }
-  .popover-heading span:not(.popover-icon), .popover-title > div > span, .workspace-popover > p, .search-result small, .popover-hint, .notification-copy > span, .notification-copy small, .preference-row small, .settings-workspace > div > span, .account-identity p, .account-detail > span { color: #a3a8b7; }
-  .search-field { border-color: #393d4b; }
-  .search-field input { color: #e0e2e9; }
-  .search-field .icon-button:hover { background: #303442; }
-  .popover-link, .notification-item, .preference-row, .account-identity, .account-detail { border-color: #373a4b; }
-  .preference-row input:checked + .toggle-track { background: #8586df; }
-  .settings-badge, .notification-count { background: #303149; color: #c0c1ff; }
-  .settings-workspace { background: #20232e; }
-  .project-row, .login-form input, .comment-form textarea, .download-button, .upload-button, .cancel-button { background: #20232e; color: #d9dbe4; }
-  .modal-close { background: #303442; color: #c4c7d1; }
-  .login-page { color: #e4e6ed; }
-  .login-form input, .comment-form textarea { border-color: #393d4b; }
-  .login-form label, .login-copy h1 { color: #e4e6ed; }
-  .login-copy p, .login-demo > span { color: #a3a8b7; }
-  .login-demo button { border-color: #393d4b; background: #252834; color: #c4c5ff; }
-  .login-art { background: #1b1d29; }
-  .art-card, .art-note { border-color: #373a4b; background: #252834ed; }
-  .art-card > strong, .art-note strong { color: #e2e4eb; }
-  .art-checks, .art-note p { color: #c2c5d0; }
-  .art-orbit { border-color: #343749; }
-  .empty-state strong, .project-dates b, .invoice-row-info strong, .milestone-copy strong { color: #d3d5de; }
-  .empty-symbol, .activity-mark, .conversation-count { background: #303149; color: #c0c1ff; }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="dark"] body, :root[data-theme="dark"] .app-shell, :root[data-theme="dark"] .main-panel { background: #171923; color: #e4e6ed; }
+:root[data-theme="dark"] .sidebar, :root[data-theme="dark"] .topbar, :root[data-theme="dark"] .panel, :root[data-theme="dark"] .stat-card, :root[data-theme="dark"] .project-row, :root[data-theme="dark"] .payment-modal, :root[data-theme="dark"] .create-project-form input, :root[data-theme="dark"] .create-project-form select, :root[data-theme="dark"] .create-project-form textarea, :root[data-theme="dark"] .login-page { background: #20232e; }
+:root[data-theme="dark"] .sidebar, :root[data-theme="dark"] .topbar, :root[data-theme="dark"] .panel, :root[data-theme="dark"] .stat-card, :root[data-theme="dark"] .workspace-switch, :root[data-theme="dark"] .profile, :root[data-theme="dark"] .project-row, :root[data-theme="dark"] .invoice-row, :root[data-theme="dark"] .invoice-table-row, :root[data-theme="dark"] .file-row, :root[data-theme="dark"] .milestone-list, :root[data-theme="dark"] .milestone, :root[data-theme="dark"] .comment-form, :root[data-theme="dark"] .full-panel { border-color: #303442; }
+:root[data-theme="dark"] .brand, :root[data-theme="dark"] h1, :root[data-theme="dark"] .panel-heading h2, :root[data-theme="dark"] .stat-card > strong, :root[data-theme="dark"] .project-info strong, :root[data-theme="dark"] .invoice-row-price > strong, :root[data-theme="dark"] .invoice-number strong, :root[data-theme="dark"] .invoice-table-row > strong, :root[data-theme="dark"] .client-details strong, :root[data-theme="dark"] .milestone-copy strong, :root[data-theme="dark"] .comment-body strong { color: #e4e6ed; }
+:root[data-theme="dark"] .page-heading p, :root[data-theme="dark"] .panel-heading p, :root[data-theme="dark"] .project-info > span, :root[data-theme="dark"] .stat-card > small, :root[data-theme="dark"] .invoice-row-info span, :root[data-theme="dark"] .client-details span, :root[data-theme="dark"] .milestone-copy span, :root[data-theme="dark"] .comment-body p { color: #a3a8b7; }
+:root[data-theme="dark"] .nav-item:hover, :root[data-theme="dark"] .nav-item.active { background: #303149; color: #b6b7ff; }
+:root[data-theme="dark"] .nav-item { color: #b2b5c2; }
+:root[data-theme="dark"] .workspace-meta strong, :root[data-theme="dark"] .profile-meta strong, :root[data-theme="dark"] .breadcrumbs strong { color: #d7d9e2; }
+:root[data-theme="dark"] .profile-meta span, :root[data-theme="dark"] .workspace-meta span, :root[data-theme="dark"] .breadcrumbs, :root[data-theme="dark"] .invoice-table-head, :root[data-theme="dark"] .invoice-table-row { color: #a0a5b3; }
+:root[data-theme="dark"] .workspace-switch, :root[data-theme="dark"] .popover, :root[data-theme="dark"] .search-result, :root[data-theme="dark"] .notification-item { background: #252834; color: #d9dbe4; }
+:root[data-theme="dark"] .workspace-switch:hover, :root[data-theme="dark"] .workspace-switch.open, :root[data-theme="dark"] .search-result:hover, :root[data-theme="dark"] .notification-item:hover { background: #2b2e3b; }
+:root[data-theme="dark"] .popover { border-color: #373a4b; }
+:root[data-theme="dark"] .popover-heading strong, :root[data-theme="dark"] .popover-title strong, :root[data-theme="dark"] .search-result strong, :root[data-theme="dark"] .notification-copy strong, :root[data-theme="dark"] .preference-row strong, :root[data-theme="dark"] .settings-workspace strong, :root[data-theme="dark"] .account-identity h2, :root[data-theme="dark"] .account-detail strong { color: #e0e2e9; }
+:root[data-theme="dark"] .popover-heading span:not(.popover-icon), :root[data-theme="dark"] .popover-title > div > span, :root[data-theme="dark"] .workspace-popover > p, :root[data-theme="dark"] .search-result small, :root[data-theme="dark"] .popover-hint, :root[data-theme="dark"] .notification-copy > span, :root[data-theme="dark"] .notification-copy small, :root[data-theme="dark"] .preference-row small, :root[data-theme="dark"] .settings-workspace > div > span, :root[data-theme="dark"] .account-identity p, :root[data-theme="dark"] .account-detail > span { color: #a3a8b7; }
+:root[data-theme="dark"] .search-field { border-color: #393d4b; }
+:root[data-theme="dark"] .search-field input { color: #e0e2e9; }
+:root[data-theme="dark"] .search-field .icon-button:hover { background: #303442; }
+:root[data-theme="dark"] .popover-link, :root[data-theme="dark"] .notification-item, :root[data-theme="dark"] .preference-row, :root[data-theme="dark"] .account-identity, :root[data-theme="dark"] .account-detail { border-color: #373a4b; }
+:root[data-theme="dark"] .preference-row input:checked + .toggle-track { background: #8586df; }
+:root[data-theme="dark"] .settings-badge, :root[data-theme="dark"] .notification-count { background: #303149; color: #c0c1ff; }
+:root[data-theme="dark"] .settings-workspace { background: #20232e; }
+:root[data-theme="dark"] .project-row, :root[data-theme="dark"] .login-form input, :root[data-theme="dark"] .comment-form textarea, :root[data-theme="dark"] .download-button, :root[data-theme="dark"] .upload-button, :root[data-theme="dark"] .cancel-button { background: #20232e; color: #d9dbe4; }
+:root[data-theme="dark"] .modal-close { background: #303442; color: #c4c7d1; }
+:root[data-theme="dark"] .login-page { color: #e4e6ed; }
+:root[data-theme="dark"] .login-form input, :root[data-theme="dark"] .comment-form textarea { border-color: #393d4b; }
+:root[data-theme="dark"] .login-form label, :root[data-theme="dark"] .login-copy h1 { color: #e4e6ed; }
+:root[data-theme="dark"] .login-copy p, :root[data-theme="dark"] .login-demo > span { color: #a3a8b7; }
+:root[data-theme="dark"] .login-demo button { border-color: #393d4b; background: #252834; color: #c4c5ff; }
+:root[data-theme="dark"] .login-art { background: #1b1d29; }
+:root[data-theme="dark"] .art-card, :root[data-theme="dark"] .art-note { border-color: #373a4b; background: #252834ed; }
+:root[data-theme="dark"] .art-card > strong, :root[data-theme="dark"] .art-note strong { color: #e2e4eb; }
+:root[data-theme="dark"] .art-checks, :root[data-theme="dark"] .art-note p { color: #c2c5d0; }
+:root[data-theme="dark"] .art-orbit { border-color: #343749; }
+:root[data-theme="dark"] .empty-state strong, :root[data-theme="dark"] .project-dates b, :root[data-theme="dark"] .invoice-row-info strong, :root[data-theme="dark"] .milestone-copy strong { color: #d3d5de; }
+:root[data-theme="dark"] .empty-symbol, :root[data-theme="dark"] .activity-mark, :root[data-theme="dark"] .conversation-count { background: #303149; color: #c0c1ff; }
