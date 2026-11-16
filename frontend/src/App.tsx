@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { HubConnectionBuilder } from '@microsoft/signalr'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
@@ -61,6 +61,9 @@ function Icon({ name }: { name: string }) {
     settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-5v2m0 14v2m9-9h-2M5 12H3m15.36-6.36-1.42 1.42M7.06 16.94l-1.42 1.42m12.72 0-1.42-1.42M7.06 7.06 5.64 5.64',
     search: 'm20 20-4.5-4.5M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z',
     bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0',
+    building: 'M3 21h18M5 21V5l7-3 7 3v16M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01',
+    chevron: 'm7 10 5 5 5-5',
+    close: 'm18 6-12 12M6 6l12 12',
     arrow: 'M5 12h14m-7-7 7 7-7 7',
     upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5 5-5 5 5m-5-5v12',
     logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 14 5-5-5-5m5 5H9',
@@ -75,6 +78,11 @@ function App() {
   const [password, setPassword] = useState('DemoPass!234')
   const [loginError, setLoginError] = useState('')
   const [activePage, setActivePage] = useState('Overview')
+  const [openPopover, setOpenPopover] = useState<'search' | 'notifications' | 'workspace' | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [notificationsSeen, setNotificationsSeen] = useState(false)
+  const [workspaceUpdates, setWorkspaceUpdates] = useState(() => localStorage.getItem('clientry-workspace-updates') !== 'false')
+  const [invoiceReminders, setInvoiceReminders] = useState(() => localStorage.getItem('clientry-invoice-reminders') !== 'false')
   const [creatingProject, setCreatingProject] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -86,8 +94,38 @@ function App() {
   const [commentText, setCommentText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const admin = user?.role === 'Admin'
+  const workspaceName = admin ? 'Studio North' : 'Northstar Studio'
+  const navigateTo = (page: string) => {
+    setActivePage(page)
+    setSelectedProject(null)
+    setOpenPopover(null)
+  }
+
+  useEffect(() => {
+    if (!openPopover) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!workspaceRef.current?.contains(target) && !actionsRef.current?.contains(target)) setOpenPopover(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenPopover(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [openPopover])
+
+  useEffect(() => {
+    if (openPopover === 'search') searchInputRef.current?.focus()
+  }, [openPopover])
   const loadData = useCallback(async (authToken: string, currentUser: User) => {
     setLoading(true)
     setError('')
@@ -208,21 +246,35 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">c</div><span>clientry</span></div>
-        <div className="workspace-switch"><div className="workspace-avatar">{admin ? 'S' : 'N'}</div><div className="workspace-meta"><strong>{admin ? 'Studio North' : 'Northstar Studio'}</strong><span>{admin ? 'Agency workspace' : 'Client workspace'}</span></div><span className="chevron">⌄</span></div>
+        <div className="workspace-container" ref={workspaceRef}>
+          <button className={`workspace-switch ${openPopover === 'workspace' ? 'open' : ''}`} aria-expanded={openPopover === 'workspace'} onClick={() => setOpenPopover(openPopover === 'workspace' ? null : 'workspace')}>
+            <span className="workspace-avatar"><Icon name="building" /></span>
+            <span className="workspace-meta"><strong>{workspaceName}</strong><span>{admin ? 'Agency workspace' : 'Client workspace'}</span></span>
+            <Icon name="chevron" />
+          </button>
+          {openPopover === 'workspace' && <div className="popover workspace-popover">
+            <div className="popover-heading"><span className="popover-icon"><Icon name="building" /></span><div><strong>{workspaceName}</strong><span>Current workspace</span></div></div>
+            <p>{admin ? 'Manage your studio and client relationships.' : 'Your projects, files, and invoices in one place.'}</p>
+            {admin && <button className="popover-link" onClick={() => navigateTo('Clients')}>View clients <Icon name="arrow" /></button>}
+            <button className="popover-link" onClick={() => navigateTo('Settings')}>Workspace settings <Icon name="arrow" /></button>
+          </div>}
+        </div>
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace navigation">
           {(admin ? ['Overview', 'Projects', 'Invoices', 'Clients'] : ['Overview', 'Projects', 'Invoices']).map((item) => (
-            <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} onClick={() => { setActivePage(item); setSelectedProject(null) }}>
+            <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} onClick={() => navigateTo(item)}>
               <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Invoices' ? 'file' : 'users'} />{item}
               {item === 'Invoices' && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <span className="nav-count">{invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').length}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item muted"><Icon name="settings" />Settings</button>
+          <button className={`nav-item muted ${activePage === 'Settings' ? 'active' : ''}`} onClick={() => navigateTo('Settings')}><Icon name="settings" />Settings</button>
           <div className="profile">
-            <div className="profile-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</div>
-            <div className="profile-meta"><strong>{user.name}</strong><span>{user.role}</span></div>
+            <button className="profile-account" onClick={() => navigateTo('Account')} aria-label={`Open ${user.name}'s account`}>
+              <span className="profile-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>
+              <span className="profile-meta"><strong>{user.name}</strong><span>{user.role}</span></span>
+            </button>
             <button className="icon-button" aria-label="Sign out" onClick={signOut}><Icon name="logout" /></button>
           </div>
         </div>
@@ -231,7 +283,17 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-separator">/</span><strong>{selectedProject?.name ?? activePage}</strong></div>
-          <div className="topbar-actions"><button className="icon-button search-button" aria-label="Search"><Icon name="search" /></button><button className="icon-button notification-button" aria-label="Notifications"><Icon name="bell" /><i /></button><div className="topbar-divider" /><div className="topbar-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</div></div>
+          <div className="topbar-actions" ref={actionsRef}>
+            <button className="icon-button search-button" aria-label="Search workspace" aria-expanded={openPopover === 'search'} onClick={() => { setSearchTerm(''); setOpenPopover(openPopover === 'search' ? null : 'search') }}><Icon name="search" /></button>
+            <button className="icon-button notification-button" aria-label="Notifications" aria-expanded={openPopover === 'notifications'} onClick={() => { setOpenPopover(openPopover === 'notifications' ? null : 'notifications'); setNotificationsSeen(true) }}><Icon name="bell" />{!notificationsSeen && <i />}</button>
+            <div className="topbar-divider" />
+            <button className="topbar-avatar" aria-label={`Open ${user.name}'s account`} onClick={() => navigateTo('Account')}>{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</button>
+            {openPopover === 'search' && <div className="popover search-popover" role="dialog" aria-label="Search workspace">
+              <label className="search-field"><Icon name="search" /><input ref={searchInputRef} value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setOpenPopover(null) }} placeholder="Search projects, invoices, clients..." /><button className="icon-button" onClick={() => setOpenPopover(null)} aria-label="Close search"><Icon name="close" /></button></label>
+              <SearchResults term={searchTerm} projects={projects} invoices={invoices} clients={admin ? clients : []} onOpenProject={(project) => { setSelectedProject(project); setOpenPopover(null) }} onOpenInvoices={() => navigateTo('Invoices')} onOpenClients={() => navigateTo('Clients')} />
+            </div>}
+            {openPopover === 'notifications' && <NotificationsPopover admin={admin} projects={projects} invoices={invoices} activity={metrics?.recentActivity ?? []} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onOpenProject={(project) => { setSelectedProject(project); setOpenPopover(null) }} onOpenInvoices={() => navigateTo('Invoices')} />}
+          </div>
         </header>
 
         <div className="content">
@@ -240,11 +302,15 @@ function App() {
           {selectedProject ? (
             <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} token={token} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => setSelectedProject(null)} />
           ) : activePage === 'Overview' ? (
-            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} onOpenProject={setSelectedProject} onOpenInvoices={() => setActivePage('Invoices')} onCreateProject={() => setCreatingProject(true)} />
+            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} onOpenProject={setSelectedProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
           ) : activePage === 'Projects' ? (
             <Projects projects={projects} onOpenProject={setSelectedProject} />
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} />
+          ) : activePage === 'Settings' ? (
+            <Settings workspaceName={workspaceName} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => { setWorkspaceUpdates(enabled); localStorage.setItem('clientry-workspace-updates', String(enabled)) }} onInvoiceRemindersChange={(enabled) => { setInvoiceReminders(enabled); localStorage.setItem('clientry-invoice-reminders', String(enabled)) }} />
+          ) : activePage === 'Account' ? (
+            <Account user={user} workspaceName={workspaceName} onSignOut={signOut} />
           ) : (
             <Clients clients={clients} />
           )}
@@ -277,9 +343,117 @@ function Login({ email, setEmail, password, setPassword, onSubmit, error }: {
   </main>
 }
 
-function Overview({ greeting, admin, projects, invoices, metrics, onOpenProject, onOpenInvoices, onCreateProject }: {
+function SearchResults({ term, projects, invoices, clients, onOpenProject, onOpenInvoices, onOpenClients }: {
+  term: string
+  projects: Project[]
+  invoices: Invoice[]
+  clients: { id: string; companyName: string; contact?: string; activeProjects: number }[]
+  onOpenProject: (project: Project) => void
+  onOpenInvoices: () => void
+  onOpenClients: () => void
+}) {
+  const query = term.trim().toLowerCase()
+  if (!query) return <p className="popover-hint">Search by project, invoice number, or client name.</p>
+  const results = [
+    ...projects.filter((project) => `${project.name} ${project.description} ${project.status}`.toLowerCase().includes(query)).map((project) => ({
+      key: `project-${project.id}`, title: project.name, detail: `Project · ${project.status}`, action: () => onOpenProject(project),
+    })),
+    ...invoices.filter((invoice) => `${invoice.number} ${invoice.status}`.toLowerCase().includes(query)).map((invoice) => ({
+      key: `invoice-${invoice.id}`, title: invoice.number, detail: `Invoice · ${invoice.status}`, action: onOpenInvoices,
+    })),
+    ...clients.filter((client) => `${client.companyName} ${client.contact ?? ''}`.toLowerCase().includes(query)).map((client) => ({
+      key: `client-${client.id}`, title: client.companyName, detail: 'Client', action: onOpenClients,
+    })),
+  ].slice(0, 7)
+  return results.length
+    ? <div className="search-results">{results.map((result) => <button key={result.key} className="search-result" onClick={result.action}><span><strong>{result.title}</strong><small>{result.detail}</small></span><Icon name="arrow" /></button>)}</div>
+    : <p className="popover-hint">No matching projects, invoices, or clients.</p>
+}
+
+function NotificationsPopover({ admin, projects, invoices, activity, workspaceUpdates, invoiceReminders, onOpenProject, onOpenInvoices }: {
+  admin: boolean
+  projects: Project[]
+  invoices: Invoice[]
+  activity: Metrics['recentActivity']
+  workspaceUpdates: boolean
+  invoiceReminders: boolean
+  onOpenProject: (project: Project) => void
+  onOpenInvoices: () => void
+}) {
+  const entries: { key: string; title: string; detail: string; when: string; action?: () => void }[] = admin
+    ? activity.filter((item) => /invoice|payment/i.test(`${item.action} ${item.metadata}`) ? invoiceReminders : workspaceUpdates).slice(0, 5).map((item, index) => ({
+      key: `activity-${item.createdAt}-${index}`, title: item.action, detail: item.metadata,
+      when: relativeDate(item.createdAt),
+    }))
+    : [
+      ...(workspaceUpdates ? projects.slice(0, 3).map((project) => ({
+        key: `project-${project.id}`, title: project.name,
+        detail: `${project.status.replace(/([A-Z])/g, ' $1').trim()} · ${project.progress}% complete`,
+        when: project.dueDate ? `Due ${new Date(project.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}` : 'Project update',
+        action: () => onOpenProject(project),
+      })) : []),
+      ...(invoiceReminders ? invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').slice(0, 2).map((invoice) => ({
+        key: `invoice-${invoice.id}`, title: `${invoice.number} needs attention`,
+        detail: `${invoice.status} · ${money(invoice.total)}`,
+        when: `Due ${new Date(invoice.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}`,
+        action: onOpenInvoices,
+      })) : []),
+    ].slice(0, 5)
+  return <div className="popover notifications-popover" role="dialog" aria-label="Workspace notifications">
+    <div className="popover-title"><div><strong>Notifications</strong><span>{admin ? 'Recent studio activity' : 'Project and billing updates'}</span></div><span className="notification-count">{entries.length}</span></div>
+    {entries.length ? <div className="notification-list">{entries.map((entry) => {
+      const content = <><span className="notification-mark"><Icon name="bell" /></span><span className="notification-copy"><strong>{entry.title}</strong><span>{entry.detail}</span><small>{entry.when}</small></span></>
+      return entry.action
+        ? <button key={entry.key} className="notification-item" onClick={entry.action}>{content}</button>
+        : <div key={entry.key} className="notification-item">{content}</div>
+    })}</div> : <p className="popover-hint">You’re all caught up. New workspace updates will appear here.</p>}
+    {!admin && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <button className="popover-link" onClick={onOpenInvoices}>Review invoices <Icon name="arrow" /></button>}
+  </div>
+}
+
+function Settings({ workspaceName, workspaceUpdates, invoiceReminders, onWorkspaceUpdatesChange, onInvoiceRemindersChange }: {
+  workspaceName: string
+  workspaceUpdates: boolean
+  invoiceReminders: boolean
+  onWorkspaceUpdatesChange: (enabled: boolean) => void
+  onInvoiceRemindersChange: (enabled: boolean) => void
+}) {
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>Settings<span className="heading-period">.</span></h1><p>Choose how you’d like to keep up with {workspaceName}.</p></div></div>
+    <section className="panel settings-panel">
+      <div className="panel-heading"><div><h2>Notifications</h2><p>Preferences are saved in this browser.</p></div><span className="settings-badge">PERSONAL</span></div>
+      <PreferenceToggle title="Workspace updates" description="Show project and activity updates in your notification menu." checked={workspaceUpdates} onChange={onWorkspaceUpdatesChange} />
+      <PreferenceToggle title="Invoice reminders" description="Keep upcoming and overdue invoices on your radar." checked={invoiceReminders} onChange={onInvoiceRemindersChange} />
+    </section>
+    <section className="panel settings-workspace"><span className="workspace-avatar"><Icon name="building" /></span><div><strong>{workspaceName}</strong><span>Current workspace</span></div></section>
+  </div>
+}
+
+function PreferenceToggle({ title, description, checked, onChange }: {
+  title: string
+  description: string
+  checked: boolean
+  onChange: (enabled: boolean) => void
+}) {
+  return <label className="preference-row"><span><strong>{title}</strong><small>{description}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-track" aria-hidden="true" /></label>
+}
+
+function Account({ user, workspaceName, onSignOut }: { user: User; workspaceName: string; onSignOut: () => void }) {
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">YOUR PROFILE</div><h1>Account<span className="heading-period">.</span></h1><p>Your account and workspace details.</p></div></div>
+    <section className="panel account-panel">
+      <div className="account-identity"><span className="account-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><div><h2>{user.name}</h2><p>{user.role}</p></div></div>
+      <div className="account-detail"><span>Account name</span><strong>{user.name}</strong></div>
+      <div className="account-detail"><span>Role</span><strong>{user.role === 'Admin' ? 'Agency admin' : 'Client'}</strong></div>
+      <div className="account-detail"><span>Workspace</span><strong>{workspaceName}</strong></div>
+      <button className="cancel-button account-signout" onClick={onSignOut}><Icon name="logout" /> Sign out</button>
+    </section>
+  </div>
+}
+
+function Overview({ greeting, admin, projects, invoices, metrics, onOpenProject, onOpenProjects, onOpenInvoices, onCreateProject }: {
   greeting: string; admin: boolean; projects: Project[]; invoices: Invoice[]; metrics: Metrics | null
-  onOpenProject: (project: Project) => void; onOpenInvoices: () => void; onCreateProject: () => void
+  onOpenProject: (project: Project) => void; onOpenProjects: () => void; onOpenInvoices: () => void; onCreateProject: () => void
 }) {
   const active = projects.filter((project) => project.status !== 'Archived')
   const outstanding = invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue')
@@ -293,7 +467,7 @@ function Overview({ greeting, admin, projects, invoices, metrics, onOpenProject,
     </div>
     <div className="overview-grid">
       <section className="panel projects-panel">
-        <div className="panel-heading"><div><h2>{admin ? 'Project pulse' : 'Your projects'}</h2><p>{admin ? 'A quick look at work in motion.' : 'Everything you’re working on, at a glance.'}</p></div><button className="text-button">View all <Icon name="arrow" /></button></div>
+        <div className="panel-heading"><div><h2>{admin ? 'Project pulse' : 'Your projects'}</h2><p>{admin ? 'A quick look at work in motion.' : 'Everything you’re working on, at a glance.'}</p></div><button className="text-button" onClick={onOpenProjects}>View all <Icon name="arrow" /></button></div>
         {active.length ? <div className="project-list">{active.slice(0, 4).map((project) => <ProjectRow key={project.id} project={project} onClick={() => onOpenProject(project)} />)}</div> : <EmptyState title="Nothing in progress just yet" text="Your active projects will appear here." />}
       </section>
       <section className="panel invoice-panel">
