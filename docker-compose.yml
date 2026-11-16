@@ -1,7 +1,7 @@
 services:
   api:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -20,7 +20,7 @@ services:
 
   client:
     build:
-      context: ./client
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         VITE_STRIPE_PUBLISHABLE_KEY: "${VITE_STRIPE_PUBLISHABLE_KEY:-}"

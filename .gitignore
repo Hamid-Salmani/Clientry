@@ -5,9 +5,9 @@
 *.db
 *.db-shm
 *.db-wal
-ClientHub.Api/App_Data/
-ClientHub.Api/smoke-files/
-ClientHub.Api/smoke-*-files/
+backend/ClientHub.Api/App_Data/
+backend/ClientHub.Api/smoke-files/
+backend/ClientHub.Api/smoke-*-files/
 .env
 .vs/
 .idea/

@@ -24,8 +24,8 @@ Open [http://localhost:5173](http://localhost:5173). The API Swagger UI is at [h
 For a non-Docker setup:
 
 ```powershell
-dotnet run --project ClientHub.Api --launch-profile http
-cd client
+dotnet run --project backend\ClientHub.Api --launch-profile http
+cd frontend
 npm ci
 npm run dev
 ```
@@ -62,7 +62,7 @@ flowchart LR
   Api --> Mailpit[Mailpit SMTP]
 ```
 
-`ClientHub.Domain` has no project dependencies. `ClientHub.Application` holds service abstractions. `ClientHub.Infrastructure` implements persistence and local file storage. `ClientHub.Api` composes services, authentication, controllers, and SignalR. To switch from SQLite to PostgreSQL, replace `UseSqlite` in API composition with `UseNpgsql`, add the Npgsql EF provider, and review provider-specific migrations; domain and application code remain provider-agnostic.
+The repository is organized into `backend/` and `frontend/`. The .NET solution and its projects live in `backend/`; the React application lives in `frontend/`. `ClientHub.Domain` has no project dependencies. `ClientHub.Application` holds service abstractions. `ClientHub.Infrastructure` implements persistence and local file storage. `ClientHub.Api` composes services, authentication, controllers, and SignalR. To switch from SQLite to PostgreSQL, replace `UseSqlite` in API composition with `UseNpgsql`, add the Npgsql EF provider, and review provider-specific migrations; domain and application code remain provider-agnostic.
 
 ## Security model
 
