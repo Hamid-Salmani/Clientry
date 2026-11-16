@@ -26,18 +26,30 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
         modelBuilder.Entity<Payment>().HasIndex(x => x.StripePaymentIntentId).IsUnique();
         modelBuilder.Entity<Client>().HasMany(x => x.Users).WithOne(x => x.Client)
             .HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Restrict);
-        modelBuilder.Entity<Project>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
-        modelBuilder.Entity<Milestone>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
-        modelBuilder.Entity<ProjectFile>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
-        modelBuilder.Entity<Comment>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
-        modelBuilder.Entity<Invoice>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+        modelBuilder.Entity<User>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<Client>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.Id == scope.ClientId));
+        modelBuilder.Entity<Invitation>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<Project>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<Milestone>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<ProjectFile>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<Comment>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<Invoice>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
         modelBuilder.Entity<InvoiceLineItem>().HasQueryFilter(x =>
-            !scope.IsClient || (x.Invoice != null && x.Invoice.ClientId == scope.ClientId));
+            !scope.IsClient || (scope.ClientId.HasValue && x.Invoice != null && x.Invoice.ClientId == scope.ClientId));
         modelBuilder.Entity<Payment>().HasQueryFilter(x =>
-            !scope.IsClient || (x.Invoice != null && x.Invoice.ClientId == scope.ClientId));
+            !scope.IsClient || (scope.ClientId.HasValue && x.Invoice != null && x.Invoice.ClientId == scope.ClientId));
         modelBuilder.Entity<Notification>().HasQueryFilter(x =>
-            !scope.IsClient || x.UserId == scope.UserId);
-        modelBuilder.Entity<ActivityLog>().HasQueryFilter(x => !scope.IsClient || x.ClientId == scope.ClientId);
+            !scope.IsClient || (scope.UserId.HasValue && x.UserId == scope.UserId));
+        modelBuilder.Entity<ActivityLog>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
         modelBuilder.Entity<Invoice>().Ignore(x => x.Total);
         modelBuilder.Entity<InvoiceLineItem>().Property(x => x.UnitPrice).HasPrecision(18, 2);
         modelBuilder.Entity<InvoiceLineItem>().Property(x => x.Quantity).HasPrecision(18, 2);

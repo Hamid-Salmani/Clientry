@@ -68,6 +68,9 @@ public sealed class DomainAndIsolationTests
             seed.AddRange(clientA, clientB,
                 new User { Id = userA, ClientId = clientA.Id, Email = "a@example.test", FullName = "Client A", Role = UserRole.Client, PasswordHash = "hash" },
                 new User { Id = userB, ClientId = clientB.Id, Email = "b@example.test", FullName = "Client B", Role = UserRole.Client, PasswordHash = "hash" },
+                new User { ClientId = null, Email = "admin@example.test", FullName = "Admin", Role = UserRole.Admin, PasswordHash = "hash" },
+                new Invitation { Email = "invite-a@example.test", TokenHash = "hash-a", ClientId = clientA.Id, ExpiresAt = DateTime.UtcNow.AddDays(1) },
+                new Invitation { Email = "invite-b@example.test", TokenHash = "hash-b", ClientId = clientB.Id, ExpiresAt = DateTime.UtcNow.AddDays(1) },
                 projectA, projectB, invoiceA, invoiceB,
                 new Milestone { ClientId = clientA.Id, ProjectId = projectA.Id, Title = "A milestone", Order = 1 },
                 new Milestone { ClientId = clientB.Id, ProjectId = projectB.Id, Title = "B milestone", Order = 1 },
@@ -85,6 +88,9 @@ public sealed class DomainAndIsolationTests
         }
 
         await using var tenant = new ClientHubDbContext(options, new TestScope(clientA.Id, userA, true));
+        Assert.Equal(["a@example.test"], await tenant.Users.Select(x => x.Email).ToListAsync());
+        Assert.Equal(["A"], await tenant.Clients.Select(x => x.CompanyName).ToListAsync());
+        Assert.Equal(["invite-a@example.test"], await tenant.Invitations.Select(x => x.Email).ToListAsync());
         Assert.Equal(["A project"], await tenant.Projects.Select(x => x.Name).ToListAsync());
         Assert.Equal(["A milestone"], await tenant.Milestones.Select(x => x.Title).ToListAsync());
         Assert.Equal(["a.pdf"], await tenant.ProjectFiles.OrderByDescending(x => x.UploadedAt).Select(x => x.FileName).ToListAsync());
@@ -96,6 +102,12 @@ public sealed class DomainAndIsolationTests
         Assert.Equal(["A"], await tenant.ActivityLogs.Select(x => x.Action).ToListAsync());
         Assert.False(await tenant.Projects.AnyAsync(x => x.Id == projectB.Id));
         Assert.False(await tenant.Invoices.AnyAsync(x => x.Id == invoiceB.Id));
+
+        await using var missingClientScope = new ClientHubDbContext(options, new TestScope(null, userA, true));
+        Assert.Empty(await missingClientScope.Users.ToListAsync());
+        Assert.Empty(await missingClientScope.Clients.ToListAsync());
+        Assert.Empty(await missingClientScope.Invitations.ToListAsync());
+        Assert.Empty(await missingClientScope.Projects.ToListAsync());
     }
 
     [Fact]

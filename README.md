@@ -70,6 +70,13 @@ Client identity is issued as a signed `client_id` JWT claim. The scoped request 
 
 Admin-only endpoints require the Admin role. SignalR project membership is checked against the same filtered project query before a connection is added to its group. Payment status is changed only after Stripe signature verification and amount/currency checks. Production deployments must configure a random `Jwt__SigningKey`, HTTPS, SMTP, and Stripe secrets outside source control.
 
+## Initial audit
+
+- **Exists:** The backend is split into domain, application, infrastructure, and API projects; EF Core migrations manage SQLite; JWT roles and login lockout protect API routes; client-owned projects, milestones, files, comments, invoices, invoice lines, payments, notifications, and activity are filtered; SignalR checks project access before group membership; Stripe webhooks validate signatures, amount, and currency.
+- **Weak, corrected:** Client requests previously had no global filters for users, clients, or invitations, and a client scope missing its `client_id` could match nullable ownership. Filters now cover those entities and fail closed when the claim is absent; the isolation test covers both client separation and missing claims.
+- **Weak:** Uploads are limited to PDF, PNG, JPEG, and TXT. Image/PDF signatures are checked, but TXT previously accepted arbitrary binary data. SignalR relies on the global project filter without an explicit client-claim check in the hub, the dashboard loads invoice/project rows into memory, and the login access token lasts two hours.
+- **Missing:** Invitation lifecycle, refresh/logout and password recovery, complete admin CRUD, project/milestone management, notifications API and server-side preferences, workspace settings, invoice editing/numbering/export, pagination/search, and the production-grade frontend flows described in the feature requirements.
+
 ## Design decisions and assumptions
 
 - SQLite and local disk are the development defaults. `IFileStorage` is the seam for replacing local disk with S3/Azure Blob.
