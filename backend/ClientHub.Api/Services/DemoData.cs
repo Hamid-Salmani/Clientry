@@ -9,21 +9,50 @@ namespace ClientHub.Api.Services;
 
 public static class DemoData
 {
+    private const string DemoPassword = "DemoPass!234";
+    private static readonly string[] DemoClientEmails = ["clienta@demo.com", "clientb@demo.com"];
+
     public static async Task InitializeAsync(IServiceProvider services)
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ClientHubDbContext>();
         var storage = scope.ServiceProvider.GetRequiredService<IFileStorage>();
         await db.Database.MigrateAsync();
-        if (await db.Users.AnyAsync()) return;
 
         var hasher = new PasswordHasher<User>();
+        if (await db.Users.AnyAsync())
+        {
+            var demoUsers = await db.Users
+                .Where(user => DemoClientEmails.Contains(user.Email))
+                .ToListAsync();
+            var changed = false;
+            foreach (var user in demoUsers)
+            {
+                if (hasher.VerifyHashedPassword(user, user.PasswordHash, DemoPassword) ==
+                    PasswordVerificationResult.Failed)
+                {
+                    user.PasswordHash = hasher.HashPassword(user, DemoPassword);
+                    changed = true;
+                }
+
+                if (user.FailedLoginAttempts != 0 || user.LockedUntil.HasValue)
+                {
+                    user.FailedLoginAttempts = 0;
+                    user.LockedUntil = null;
+                    changed = true;
+                }
+            }
+
+            if (changed) await db.SaveChangesAsync();
+            return;
+        }
+
         var clientA = new Client { CompanyName = "Northstar Studio", Notes = "Brand and digital design partner" };
         var clientB = new Client { CompanyName = "Juniper & Co.", Notes = "Advisory client" };
         User NewUser(string email, string name, UserRole role, Guid? clientId)
         {
             var user = new User { Email = email, FullName = name, Role = role, ClientId = clientId, PasswordHash = "" };
-            user.PasswordHash = hasher.HashPassword(user, "DemoPass!234");
+            user.PasswordHash = hasher.HashPassword(user, DemoPassword);
             return user;
         }
         var admin = NewUser("admin@demo.com", "Alex Morgan", UserRole.Admin, null);
