@@ -21,7 +21,7 @@ public static class DemoData
         var hasher = new PasswordHasher<User>();
         var demoEmails = new[] { "admin@demo.com", "clienta@demo.com", "clientb@demo.com" };
         var demoUsers = await db.Users
-            .Where(user => demoEmails.Contains(user.Email, StringComparer.OrdinalIgnoreCase))
+            .Where(user => demoEmails.Contains(user.Email.ToLower()))
             .ToListAsync();
 
         foreach (var user in demoUsers)
