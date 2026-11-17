@@ -61,8 +61,9 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
             .ToListAsync(cancellationToken);
         var items = invoices.Select(invoice => new
         {
-            invoice.Id, invoice.Number, invoice.IssueDate, invoice.DueDate, status = invoice.Status.ToString(),
-            invoice.Currency, total = invoice.Total
+            invoice.Id, invoice.ClientId, invoice.Number, invoice.IssueDate, invoice.DueDate, status = invoice.Status.ToString(),
+            invoice.Currency, total = invoice.Total,
+            lines = invoice.Lines.Select(line => new { line.Description, line.Quantity, line.UnitPrice })
         }).ToArray();
         return Ok(new PagedResult<object>(items.Cast<object>().ToArray(), total, page, pageSize));
     }

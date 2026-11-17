@@ -19,7 +19,17 @@ type Project = {
   progress: number
   milestones: { id: string; title: string; isCompleted: boolean; dueDate?: string }[]
 }
-type Invoice = { id: string; number: string; issueDate: string; dueDate: string; status: string; total: number; currency: string }
+type Invoice = {
+  id: string; clientId: string; number: string; issueDate: string; dueDate: string
+  status: string; total: number; currency: string
+  lines: { description: string; quantity: number; unitPrice: number }[]
+}
+type ClientSummary = { id: string; companyName: string; contact?: string; activeProjects: number; isActive: boolean }
+type ClientDetails = {
+  id: string; companyName: string; notes: string; isActive: boolean; projectCount: number
+  outstandingBalance: number; lifetimeRevenue: number
+  users: { id: string; fullName: string; email: string; isActive: boolean }[]
+}
 type Metrics = {
   activeProjects: number
   clientCount: number
@@ -101,7 +111,7 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [clients, setClients] = useState<{ id: string; companyName: string; contact?: string; activeProjects: number }[]>([])
+  const [clients, setClients] = useState<ClientSummary[]>([])
   const [workspaceSettings, setWorkspaceSettings] = useState<AdminWorkspaceSettings>({
     name: 'Studio North',
     supportEmail: 'support@studionorth.example',
@@ -184,7 +194,7 @@ function App() {
       if (user?.role !== 'Admin') return { projects: projectData.items, invoices: invoiceData.items }
       const [dashboard, clientData, settings] = await Promise.all([
         request<Metrics>('/admin/dashboard', token),
-        request<{ items: { id: string; companyName: string; contact?: string; activeProjects: number }[] }>('/admin/clients?page=1&pageSize=100', token),
+        request<{ items: ClientSummary[] }>('/admin/clients?page=1&pageSize=100', token),
         request<AdminWorkspaceSettings>('/admin/workspace-settings', token),
       ])
       return {
@@ -493,13 +503,13 @@ function App() {
           ) : activePage === 'Projects' ? (
             <Projects projects={projects} onOpenProject={openProject} />
           ) : activePage === 'Invoices' ? (
-            <Invoices invoices={invoices} token={token} />
+            <Invoices invoices={invoices} token={token} admin={Boolean(admin)} clients={clients} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           ) : activePage === 'Settings' ? (
             <Settings workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
           ) : activePage === 'Account' ? (
             <Account user={user} workspaceName={workspaceName} onSignOut={signOut} />
           ) : (
-            <Clients clients={clients} />
+            <Clients clients={clients} token={token} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           )}
         </div>
       </main>
@@ -683,12 +693,16 @@ function Projects({ projects, onOpenProject }: { projects: Project[]; onOpenProj
   return <div className="page-enter"><div className="page-heading"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>Projects<span className="heading-period">.</span></h1><p>All the moving pieces, in one clear view.</p></div></div><section className="panel full-panel">{projects.length ? projects.map((project) => <ProjectRow key={project.id} project={project} onClick={() => onOpenProject(project)} />) : <EmptyState title="No projects yet" text="Your team will add a project here when work begins." />}</section></div>
 }
 
-function Invoices({ invoices, token }: { invoices: Invoice[]; token: string }) {
+function Invoices({ invoices, token, admin, clients, onChanged }: {
+  invoices: Invoice[]; token: string; admin: boolean; clients: ClientSummary[]; onChanged: () => void
+}) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null)
   const [clientSecret, setClientSecret] = useState('')
   const [paymentComplete, setPaymentComplete] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null)
   async function download(invoice: Invoice) {
     setBusy(invoice.id); setError('')
     try {
@@ -709,8 +723,28 @@ function Invoices({ invoices, token }: { invoices: Invoice[]; token: string }) {
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to start payment.') }
     finally { setBusy('') }
   }
+  async function updateDraft(invoice: Invoice, action: 'send' | 'delete') {
+    setBusy(invoice.id); setError('')
+    try {
+      await request<void>(`/invoices/${invoice.id}${action === 'send' ? '/send' : ''}`, token, {
+        method: action === 'send' ? 'POST' : 'DELETE',
+      })
+      onChanged()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : `Unable to ${action} invoice.`) }
+    finally { setBusy('') }
+  }
+  async function exportCsv() {
+    setError('')
+    try {
+      const response = await fetch(`${apiBase}/api/invoices/export.csv`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!response.ok) throw new Error(`Could not export invoices (${response.status}).`)
+      const url = URL.createObjectURL(await response.blob())
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'invoices.csv'; anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to export invoices.') }
+  }
   return <div className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>Invoices<span className="heading-period">.</span></h1><p>Everything related to your billing, all together.</p></div><span className="invoice-total">{invoices.length} total</span></div>
+    <div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>Invoices<span className="heading-period">.</span></h1><p>Everything related to your billing, all together.</p></div><div className="invoice-heading-actions"><span className="invoice-total">{invoices.length} total</span>{admin && <><button className="cancel-button" onClick={() => void exportCsv()}>Export CSV</button><button className="primary-button" onClick={() => setCreating(true)}>＋ New invoice</button></>}</div></div>
     {error && <div className="alert" role="alert">{error}</div>}
     <section className="panel full-panel">
       <div className="invoice-table-head"><span>INVOICE</span><span>ISSUED</span><span>DUE DATE</span><span>STATUS</span><span>AMOUNT</span><span /></div>
@@ -721,12 +755,20 @@ function Invoices({ invoices, token }: { invoices: Invoice[]; token: string }) {
         <span className={`status-pill status-${invoice.status.toLowerCase()}`}>{invoice.status}</span>
         <strong>{new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(invoice.total)}</strong>
         <div className="invoice-actions">
+          {admin && invoice.status === 'Draft' && <>
+            <button className="text-button" onClick={() => setEditingInvoice(invoice)}>Edit</button>
+            <button className="text-button" onClick={() => void updateDraft(invoice, 'send')} disabled={busy === invoice.id}>Send</button>
+            <button className="cancel-button" onClick={() => void updateDraft(invoice, 'delete')} disabled={busy === invoice.id}>Delete</button>
+          </>}
           {(invoice.status === 'Sent' || invoice.status === 'Overdue') && stripePromise && <button className="pay-button" onClick={() => void beginPayment(invoice)} disabled={busy === invoice.id}>{busy === invoice.id ? '...' : 'Pay'}</button>}
           <button className="download-button" onClick={() => void download(invoice)} disabled={busy === invoice.id}>{busy === invoice.id ? '...' : 'PDF'} <Icon name="arrow" /></button>
         </div>
       </div>) : <EmptyState title="No invoices yet" text="Any new invoice will be easy to find here." />}
     </section>
     {!stripePromise && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <p className="payment-note">Online payments are not configured for this demo.</p>}
+    {(creating || editingInvoice) && <InvoiceDraftModal invoice={editingInvoice} clients={clients} token={token}
+      onClose={() => { setCreating(false); setEditingInvoice(null) }}
+      onSaved={() => { setCreating(false); setEditingInvoice(null); onChanged() }} />}
     {paymentInvoice && clientSecret && stripePromise && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setPaymentInvoice(null); setClientSecret('') } }}>
       <section className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-title">
         <button className="modal-close" onClick={() => { setPaymentInvoice(null); setClientSecret('') }} aria-label="Close payment">×</button>
@@ -736,6 +778,62 @@ function Invoices({ invoices, token }: { invoices: Invoice[]; token: string }) {
           <Elements stripe={stripePromise} options={{ clientSecret }}><PaymentForm onComplete={() => setPaymentComplete(true)} /></Elements>}
       </section>
     </div>}
+  </div>
+}
+
+function InvoiceDraftModal({ invoice, clients, token, onClose, onSaved }: {
+  invoice: Invoice | null
+  clients: ClientSummary[]
+  token: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [clientId, setClientId] = useState(invoice?.clientId ?? clients[0]?.id ?? '')
+  const [dueDate, setDueDate] = useState(invoice?.dueDate ?? new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+  const [lines, setLines] = useState(() => invoice?.lines.map((line) => ({ ...line })) ?? [{ description: '', quantity: 1, unitPrice: 0 }])
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  function updateLine(index: number, patch: Partial<(typeof lines)[number]>) {
+    setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, ...patch } : line))
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try {
+      await request(invoice ? `/invoices/${invoice.id}` : '/invoices', token, {
+        method: invoice ? 'PUT' : 'POST',
+        body: JSON.stringify({ clientId, projectId: null, dueDate, currency: 'USD', lines }),
+      })
+      onSaved()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save the invoice.') }
+    finally { setBusy(false) }
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="payment-modal project-modal invoice-draft-modal" role="dialog" aria-modal="true" aria-labelledby="invoice-draft-title">
+      <button className="modal-close" onClick={onClose} aria-label="Close invoice form">×</button>
+      <div className="eyebrow">BILLING</div><h2 id="invoice-draft-title">{invoice ? `Edit ${invoice.number}` : 'Create invoice draft'}</h2>
+      <form className="create-project-form" onSubmit={submit}>
+        <label>Client<select value={clientId} onChange={(event) => setClientId(event.target.value)} required>
+          {clients.filter((client) => client.isActive || client.id === invoice?.clientId).map((client) => <option key={client.id} value={client.id}>{client.companyName}</option>)}
+        </select></label>
+        <label>Due date<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} required /></label>
+        <div className="invoice-line-editor">
+          {lines.map((line, index) => <div className="invoice-line-edit" key={index}>
+            <label>Description<input value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} maxLength={240} required /></label>
+            <label>Qty<input type="number" min="0.01" max="1000000" step="0.01" value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} required /></label>
+            <label>Unit price<input type="number" min="0" max="1000000000" step="0.01" value={line.unitPrice} onChange={(event) => updateLine(index, { unitPrice: Number(event.target.value) })} required /></label>
+            {lines.length > 1 && <button type="button" className="cancel-button" onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))} aria-label={`Remove line ${index + 1}`}>×</button>}
+          </div>)}
+        </div>
+        <button type="button" className="text-button" onClick={() => setLines((current) => [...current, { description: '', quantity: 1, unitPrice: 0 }])} disabled={lines.length >= 50}>＋ Add line item</button>
+        {error && <p className="payment-error" role="alert">{error}</p>}
+        {!clients.some((client) => client.isActive) && <p className="payment-error" role="alert">Create an active client before creating an invoice.</p>}
+        <div className="modal-actions"><button type="button" className="cancel-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !clients.some((client) => client.isActive)}>{busy ? 'Saving...' : 'Save draft'}</button></div>
+      </form>
+    </section>
   </div>
 }
 
@@ -756,8 +854,148 @@ function PaymentForm({ onComplete }: { onComplete: () => void }) {
   return <form className="payment-form" onSubmit={submit}><PaymentElement />{error && <p className="payment-error" role="alert">{error}</p>}<button className="primary-button" disabled={!stripe || busy}>{busy ? 'Processing...' : 'Confirm payment'}</button></form>
 }
 
-function Clients({ clients }: { clients: { id: string; companyName: string; contact?: string; activeProjects: number }[] }) {
-  return <div className="page-enter"><div className="page-heading"><div><div className="eyebrow">RELATIONSHIPS</div><h1>Clients<span className="heading-period">.</span></h1><p>Good work starts with good relationships.</p></div></div><section className="panel full-panel">{clients.length ? clients.map((client) => <div className="client-row" key={client.id}><div className="client-avatar">{client.companyName[0]}</div><div className="client-details"><strong>{client.companyName}</strong><span>{client.contact ?? 'No active contact'}</span></div><span className="client-project-count">{client.activeProjects} active {client.activeProjects === 1 ? 'project' : 'projects'}</span></div>) : <EmptyState title="No clients to show" text="Your client relationships will appear here." />}</section></div>
+function Clients({ clients, token, onChanged }: { clients: ClientSummary[]; token: string; onChanged: () => void }) {
+  const [search, setSearch] = useState('')
+  const [newClientOpen, setNewClientOpen] = useState(false)
+  const [inviteClient, setInviteClient] = useState<ClientSummary | null>(null)
+  const [companyName, setCompanyName] = useState('')
+  const [notes, setNotes] = useState('')
+  const [inviteName, setInviteName] = useState('')
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [selectedClientId, setSelectedClientId] = useState('')
+  const [details, setDetails] = useState<ClientDetails | null>(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [editCompanyName, setEditCompanyName] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const filtered = clients.filter((client) => `${client.companyName} ${client.contact ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()))
+
+  async function createClient(event: FormEvent) {
+    event.preventDefault()
+    setBusy('create'); setError('')
+    try {
+      await request('/admin/clients', token, { method: 'POST', body: JSON.stringify({ companyName, notes }) })
+      setCompanyName(''); setNotes(''); setNewClientOpen(false); onChanged()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to create the client.') }
+    finally { setBusy('') }
+  }
+
+  async function inviteUser(event: FormEvent) {
+    event.preventDefault()
+    if (!inviteClient) return
+    setBusy(inviteClient.id); setError('')
+    try {
+      await request(`/admin/clients/${inviteClient.id}/invitations`, token, {
+        method: 'POST', body: JSON.stringify({ fullName: inviteName, email: inviteEmail }),
+      })
+      setInviteName(''); setInviteEmail(''); setInviteClient(null)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to send the invitation.') }
+    finally { setBusy('') }
+  }
+
+  async function toggleClient(client: ClientSummary) {
+    setBusy(client.id); setError('')
+    try {
+      await request(`/admin/clients/${client.id}/status`, token, {
+        method: 'PATCH', body: JSON.stringify({ isActive: !client.isActive }),
+      })
+      onChanged()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to update client status.') }
+    finally { setBusy('') }
+  }
+
+  async function showClient(client: ClientSummary) {
+    if (selectedClientId === client.id) {
+      setSelectedClientId('')
+      setDetails(null)
+      return
+    }
+    setSelectedClientId(client.id); setDetails(null); setDetailsLoading(true); setError('')
+    try {
+      const result = await request<ClientDetails>(`/admin/clients/${client.id}`, token)
+      setDetails(result)
+      setEditCompanyName(result.companyName)
+      setEditNotes(result.notes)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load client details.') }
+    finally { setDetailsLoading(false) }
+  }
+
+  async function saveClientDetails(event: FormEvent) {
+    event.preventDefault()
+    if (!details) return
+    setBusy(details.id); setError('')
+    try {
+      await request(`/admin/clients/${details.id}`, token, {
+        method: 'PUT', body: JSON.stringify({ companyName: editCompanyName, notes: editNotes }),
+      })
+      const refreshed = await request<ClientDetails>(`/admin/clients/${details.id}`, token)
+      setDetails(refreshed); onChanged()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save client details.') }
+    finally { setBusy('') }
+  }
+
+  async function toggleClientUser(user: ClientDetails['users'][number]) {
+    if (!details) return
+    setBusy(user.id); setError('')
+    try {
+      await request(`/admin/clients/${details.id}/users/${user.id}/status`, token, {
+        method: 'PATCH', body: JSON.stringify({ isActive: !user.isActive }),
+      })
+      const refreshed = await request<ClientDetails>(`/admin/clients/${details.id}`, token)
+      setDetails(refreshed); onChanged()
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to update user status.') }
+    finally { setBusy('') }
+  }
+
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">RELATIONSHIPS</div><h1>Clients<span className="heading-period">.</span></h1><p>Good work starts with good relationships.</p></div><button className="primary-button" onClick={() => setNewClientOpen((open) => !open)}>＋ New client</button></div>
+    {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
+    {newClientOpen && <form className="panel admin-form" onSubmit={createClient}>
+      <label>Company name<input value={companyName} onChange={(event) => setCompanyName(event.target.value)} maxLength={160} required /></label>
+      <label>Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} /></label>
+      <div className="modal-actions"><button type="button" className="cancel-button" onClick={() => setNewClientOpen(false)}>Cancel</button><button className="primary-button" disabled={busy === 'create'}>{busy === 'create' ? 'Saving...' : 'Create client'}</button></div>
+    </form>}
+    <section className="panel full-panel">
+      <div className="client-tools"><input aria-label="Search clients" placeholder="Search clients..." value={search} onChange={(event) => setSearch(event.target.value)} /><span>{filtered.length} clients</span></div>
+      {filtered.length ? filtered.map((client) => <div className="client-record" key={client.id}>
+        <div className="client-row">
+          <div className="client-avatar">{client.companyName[0]}</div>
+          <div className="client-details"><strong>{client.companyName}</strong><span>{client.contact ?? 'No active contact'} · {client.isActive ? 'Active' : 'Inactive'}</span></div>
+          <span className="client-project-count">{client.activeProjects} active {client.activeProjects === 1 ? 'project' : 'projects'}</span>
+          <button className="text-button" onClick={() => void showClient(client)}>{selectedClientId === client.id ? 'Hide details' : 'Details'}</button>
+          <button className="text-button" onClick={() => setInviteClient(client)} disabled={!client.isActive}>Invite user</button>
+          <button className="cancel-button" onClick={() => void toggleClient(client)} disabled={busy === client.id}>{client.isActive ? 'Deactivate' : 'Activate'}</button>
+        </div>
+        {selectedClientId === client.id && <div className="client-detail-card">
+          {detailsLoading ? <p className="popover-hint">Loading client details...</p> : details && <>
+            <div className="client-financials"><span>{details.projectCount} projects</span><span>{money(details.outstandingBalance)} outstanding</span><span>{money(details.lifetimeRevenue)} lifetime revenue</span></div>
+            <form className="admin-form client-edit-form" onSubmit={saveClientDetails}>
+              <label>Company name<input value={editCompanyName} onChange={(event) => setEditCompanyName(event.target.value)} maxLength={160} required /></label>
+              <label>Notes<textarea value={editNotes} onChange={(event) => setEditNotes(event.target.value)} maxLength={4000} /></label>
+              <button className="primary-button" disabled={busy === details.id}>{busy === details.id ? 'Saving...' : 'Save client'}</button>
+            </form>
+            <div className="client-user-list"><strong>Client users</strong>{details.users.length ? details.users.map((user) => <div className="client-user-row" key={user.id}>
+              <span><b>{user.fullName}</b><small>{user.email} · {user.isActive ? 'Active' : 'Inactive'}</small></span>
+              <button className="cancel-button" onClick={() => void toggleClientUser(user)} disabled={busy === user.id}>{user.isActive ? 'Deactivate' : 'Activate'}</button>
+            </div>) : <p className="popover-hint">No client users yet.</p>}</div>
+          </>}
+        </div>}
+      </div>) : <EmptyState title="No clients to show" text="Create a client or adjust your search." />}
+    </section>
+    {inviteClient && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setInviteClient(null) }}>
+      <section className="payment-modal project-modal" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+        <button className="modal-close" onClick={() => setInviteClient(null)} aria-label="Close invitation">×</button>
+        <div className="eyebrow">CLIENT ACCESS</div><h2 id="invite-title">Invite to {inviteClient.companyName}</h2>
+        <form className="create-project-form" onSubmit={inviteUser}>
+          <label>Full name<input value={inviteName} onChange={(event) => setInviteName(event.target.value)} maxLength={120} required /></label>
+          <label>Email<input type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} maxLength={254} required /></label>
+          {error && <p className="payment-error" role="alert">{error}</p>}
+          <button className="primary-button" disabled={busy === inviteClient.id}>{busy === inviteClient.id ? 'Sending...' : 'Send invitation'}</button>
+        </form>
+      </section>
+    </div>}
+  </div>
 }
 
 function ProjectCreateModal({ clients, token, onClose, onCreated }: {

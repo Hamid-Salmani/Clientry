@@ -211,11 +211,32 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .download-button:hover { background: #f5f5ff; }
 .client-row { display: flex; align-items: center; gap: 12px; min-height: 62px; border-top: 1px solid #eff0f3; }
 .client-row:first-child { border: 0; }
+.client-record + .client-record .client-row { border-top: 1px solid #eff0f3; }
+.client-detail-card { margin: 0 0 12px 44px; border: 1px solid #eff0f3; border-radius: 8px; padding: 13px; background: #fcfcfe; }
+.client-financials { display: flex; flex-wrap: wrap; gap: 16px; color: #777b89; font-size: 9px; }
+.client-edit-form { margin: 12px 0; padding: 12px; }
+.client-user-list { display: flex; flex-direction: column; gap: 7px; color: #555967; font-size: 10px; }
+.client-user-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #eff0f3; padding-top: 8px; }
+.client-user-row > span { display: flex; flex-direction: column; gap: 4px; }
+.client-user-row small { color: #999da8; font-size: 9px; }
 .client-avatar { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; background: #f7eee7; color: #a87856; font-size: 12px; font-weight: 700; }
 .client-details { display: flex; flex: 1; flex-direction: column; gap: 4px; }
 .client-details strong { color: #555967; font-size: 10px; font-weight: 650; }
 .client-details span, .client-project-count { color: #999da8; font-size: 9px; }
 .client-project-count { margin-right: 16px; }
+.client-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 0 12px; color: #999da8; font-size: 9px; }
+.client-tools input { width: min(320px, 100%); height: 34px; border: 1px solid #e8e9ef; border-radius: 6px; padding: 0 10px; background: white; color: #4c5060; }
+.admin-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; padding: 16px; }
+.admin-form label { display: flex; flex-direction: column; gap: 6px; color: #656977; font-size: 9px; font-weight: 600; }
+.admin-form input, .admin-form textarea { width: 100%; min-height: 35px; border: 1px solid #e8e9ef; border-radius: 6px; padding: 8px 9px; background: white; color: #4c5060; font-size: 10px; }
+.admin-form textarea { min-height: 70px; resize: vertical; }
+.invoice-heading-actions { display: flex; align-items: center; gap: 8px; }
+.invoice-line-editor { display: flex; flex-direction: column; gap: 8px; }
+.invoice-line-edit { display: grid; grid-template-columns: minmax(100px, 1fr) 72px 105px auto; align-items: end; gap: 7px; }
+.invoice-line-edit label { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: #656977; font-size: 8px; }
+.invoice-line-edit input, .invoice-draft-modal select { width: 100%; min-width: 0; min-height: 34px; border: 1px solid #e8e9ef; border-radius: 6px; padding: 7px; background: white; color: #4c5060; font-size: 9px; }
+.invoice-draft-modal { max-height: 90vh; overflow-y: auto; }
+.invoice-draft-modal .create-project-form { gap: 10px; }
 .settings-panel { max-width: 760px; padding: 19px; }
 .settings-panel .panel-heading { margin-bottom: 6px; }
 .workspace-settings-form { display: flex; flex-direction: column; gap: 12px; margin-top: 13px; }
@@ -390,6 +411,10 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
   .page-heading { align-items: flex-start; gap: 12px; }
   h1 { font-size: 25px; }
   .page-heading > .primary-button { flex: none; padding: 0 9px; font-size: 9px; }
+  .invoice-heading-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .client-row { flex-wrap: wrap; padding: 9px 0; }
+  .client-details { flex-basis: calc(100% - 46px); }
+  .client-detail-card { margin-left: 0; }
   .stats-grid { gap: 9px; }
   .stat-card { min-height: 102px; padding: 13px 12px; }
   .stat-card > strong { font-size: 21px; }
@@ -440,6 +465,11 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 :root[data-theme="dark"] .preference-row input:checked + .toggle-track { background: #8586df; }
 :root[data-theme="dark"] .settings-badge, :root[data-theme="dark"] .notification-count { background: #303149; color: #c0c1ff; }
 :root[data-theme="dark"] .settings-workspace { background: #20232e; }
+:root[data-theme="dark"] .client-detail-card { border-color: #303442; background: #20232e; }
+:root[data-theme="dark"] .client-user-list { color: #e0e2e9; }
+:root[data-theme="dark"] .client-user-row { border-color: #303442; }
+:root[data-theme="dark"] .client-financials, :root[data-theme="dark"] .client-user-row small { color: #a3a8b7; }
+:root[data-theme="dark"] .client-tools input, :root[data-theme="dark"] .admin-form input, :root[data-theme="dark"] .admin-form textarea, :root[data-theme="dark"] .invoice-line-edit input, :root[data-theme="dark"] .invoice-draft-modal select { border-color: #393d4b; background: #20232e; color: #d9dbe4; }
 :root[data-theme="dark"] .workspace-settings-form input { border-color: #393d4b; background: #20232e; color: #d9dbe4; }
 :root[data-theme="dark"] .project-row, :root[data-theme="dark"] .login-form input, :root[data-theme="dark"] .comment-form textarea, :root[data-theme="dark"] .download-button, :root[data-theme="dark"] .upload-button, :root[data-theme="dark"] .cancel-button { background: #20232e; color: #d9dbe4; }
 :root[data-theme="dark"] .modal-close { background: #303442; color: #c4c7d1; }
