@@ -19,7 +19,8 @@ public sealed class ProjectRequestsController(
     IFileStorage storage,
     IValidator<ProjectRequestsController.CreateRequest> validator,
     IEmailSender emailSender,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    IValidator<ProjectRequestsController.AdminDecisionRequest> decisionValidator) : ControllerBase
 {
     private const long MaxAttachmentSize = 10 * 1024 * 1024;
     private static readonly IReadOnlyDictionary<string, string> AllowedTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -187,16 +188,18 @@ public sealed class ProjectRequestsController(
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Decide(Guid requestId, AdminDecisionRequest decision, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(decision.Note) || decision.Note.Trim().Length > 2000 ||
-            !Enum.TryParse<ProjectRequestStatus>(decision.Status, true, out var next) ||
+        var validation = await decisionValidator.ValidateAsync(decision, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
+        if (!Enum.TryParse<ProjectRequestStatus>(decision.Status, true, out var next) ||
             next is not (ProjectRequestStatus.Accepted or ProjectRequestStatus.Declined))
-            return BadRequest(new { message = "Choose Accepted or Declined and provide a note of at most 2,000 characters." });
+            return BadRequest(new { message = "Choose Accepted or Declined." });
         var request = await db.ProjectRequests.SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken);
         if (request is null) return NotFound();
         if (request.Status is not (ProjectRequestStatus.New or ProjectRequestStatus.InReview))
             return Conflict(new { message = "This request can no longer be reviewed." });
         request.Status = next;
-        request.AdminNote = decision.Note.Trim();
+        request.AdminNote = decision.Note?.Trim() ?? string.Empty;
         request.UpdatedAt = DateTime.UtcNow;
         await NotifyClientAsync(request, $"Your request “{request.Title}” was {next}. {request.AdminNote}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);

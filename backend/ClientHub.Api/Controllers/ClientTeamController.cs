@@ -8,6 +8,7 @@ using ClientHub.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 
 namespace ClientHub.Api.Controllers;
 
@@ -17,7 +18,8 @@ namespace ClientHub.Api.Controllers;
 public sealed class ClientTeamController(
     ClientHubDbContext db,
     IEmailSender emailSender,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    IValidator<ClientTeamController.InvitationRequest> validator) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
@@ -48,9 +50,11 @@ public sealed class ClientTeamController(
         if (client is null) return NotFound();
         if (!await IsOwnerAsync(cancellationToken)) return Forbid();
         if (!client.IsActive) return Conflict(new { message = "Invitations cannot be created for an inactive client." });
-        if (!TryNormalizeEmail(request.Email, out var email) ||
-            string.IsNullOrWhiteSpace(request.FullName) || request.FullName.Trim().Length > 120)
-            return BadRequest(new { message = "A valid email and name of at most 120 characters are required." });
+        var validation = await validator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
+        if (!TryNormalizeEmail(request.Email, out var email))
+            return BadRequest(new { message = "A valid email address is required." });
         if (await db.Users.IgnoreQueryFilters().AnyAsync(user => user.Email.ToLower() == email, cancellationToken))
             return Conflict(new { message = "An account with this email already exists." });
 

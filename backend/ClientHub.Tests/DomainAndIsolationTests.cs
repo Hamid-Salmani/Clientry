@@ -1,6 +1,7 @@
 using ClientHub.Application;
 using ClientHub.Api.Controllers;
 using ClientHub.Api.Services;
+using ClientHub.Api.Validators;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
@@ -108,7 +109,7 @@ public sealed class DomainAndIsolationTests
             await adminDb.Database.EnsureCreatedAsync();
             adminDb.AddRange(client, admin, member, project, milestone);
             await adminDb.SaveChangesAsync();
-            var controller = new ApprovalsController(adminDb, emails, configuration);
+            var controller = new ApprovalsController(adminDb, emails, configuration, new ApprovalDecisionValidator());
             SetAuthenticatedUser(controller, admin.Id, UserRole.Admin);
 
             Assert.IsType<NoContentResult>(await controller.RequestApproval(project.Id, milestone.Id, CancellationToken.None));
@@ -119,7 +120,7 @@ public sealed class DomainAndIsolationTests
 
         await using (var clientDb = new ClientHubDbContext(options, new TestScope(client.Id, member.Id, true)))
         {
-            var controller = new ApprovalsController(clientDb, emails, configuration);
+            var controller = new ApprovalsController(clientDb, emails, configuration, new ApprovalDecisionValidator());
             SetAuthenticatedUser(controller, member.Id, UserRole.Client, client.Id);
             Assert.IsType<NoContentResult>(await controller.Decide(project.Id, milestone.Id,
                 new ApprovalsController.ApprovalDecisionRequest("Approved", null), CancellationToken.None));
@@ -152,7 +153,8 @@ public sealed class DomainAndIsolationTests
         await db.Database.EnsureCreatedAsync();
         db.AddRange(client, member, project, milestone);
         await db.SaveChangesAsync();
-        var controller = new ApprovalsController(db, new CapturingEmailSender(), new ConfigurationBuilder().Build());
+        var controller = new ApprovalsController(
+            db, new CapturingEmailSender(), new ConfigurationBuilder().Build(), new ApprovalDecisionValidator());
         SetAuthenticatedUser(controller, member.Id, UserRole.Client, client.Id);
 
         Assert.IsType<BadRequestObjectResult>(await controller.Decide(project.Id, milestone.Id,
@@ -288,8 +290,8 @@ public sealed class DomainAndIsolationTests
         await db.SaveChangesAsync();
 
         var controller = new ProjectRequestsController(db, new UnusedFileStorage(),
-            new ClientHub.Api.Validators.ProjectRequestValidator(), new CapturingEmailSender(),
-            new ConfigurationBuilder().AddInMemoryCollection().Build());
+            new ProjectRequestValidator(), new CapturingEmailSender(),
+            new ConfigurationBuilder().AddInMemoryCollection().Build(), new ProjectRequestDecisionValidator());
         SetAuthenticatedUser(controller, admin.Id, UserRole.Admin);
         Assert.IsType<NoContentResult>(await controller.StartReview(newRequest.Id, CancellationToken.None));
         Assert.Equal(ProjectRequestStatus.InReview, newRequest.Status);
@@ -519,7 +521,7 @@ public sealed class DomainAndIsolationTests
         await db.Database.EnsureCreatedAsync();
         db.AddRange(client, owner, member);
         await db.SaveChangesAsync();
-        var controller = new ClientBillingController(db);
+        var controller = new ClientBillingController(db, new BillingDetailsValidator());
         var request = new ClientBillingController.BillingDetailsRequest(
             "Billing Client LLC", "TAX-1", "billing@example.test; finance@example.test", "1 Main Street");
 
@@ -934,7 +936,7 @@ public sealed class DomainAndIsolationTests
         }).Build();
         await using (var ownerDb = new ClientHubDbContext(options, new TestScope(client.Id, owner.Id, true)))
         {
-            var controller = new ClientTeamController(ownerDb, emails, configuration);
+            var controller = new ClientTeamController(ownerDb, emails, configuration, new ClientTeamInvitationValidator());
             SetAuthenticatedUser(controller, owner.Id, UserRole.Client, client.Id);
             Assert.IsType<ConflictObjectResult>(await controller.Invite(
                 new ClientTeamController.InvitationRequest(outsider.Email, "Other Member"), CancellationToken.None));
@@ -948,7 +950,7 @@ public sealed class DomainAndIsolationTests
 
         await using (var memberDb = new ClientHubDbContext(options, new TestScope(client.Id, member.Id, true)))
         {
-            var controller = new ClientTeamController(memberDb, emails, configuration);
+            var controller = new ClientTeamController(memberDb, emails, configuration, new ClientTeamInvitationValidator());
             SetAuthenticatedUser(controller, member.Id, UserRole.Client, client.Id);
             Assert.IsType<ForbidResult>(await controller.List(CancellationToken.None));
             Assert.IsType<ForbidResult>(await controller.Invite(

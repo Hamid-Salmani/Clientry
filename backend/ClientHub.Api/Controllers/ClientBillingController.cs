@@ -1,7 +1,7 @@
-using System.Net.Mail;
 using System.Security.Claims;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
+using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +11,9 @@ namespace ClientHub.Api.Controllers;
 [ApiController]
 [Authorize(Roles = "Client")]
 [Route("api/me/billing")]
-public sealed class ClientBillingController(ClientHubDbContext db) : ControllerBase
+public sealed class ClientBillingController(
+    ClientHubDbContext db,
+    IValidator<ClientBillingController.BillingDetailsRequest> validator) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
@@ -33,8 +35,9 @@ public sealed class ClientBillingController(ClientHubDbContext db) : ControllerB
         var isOwner = await db.Users.AsNoTracking().AnyAsync(user =>
             user.Id == userId && user.ClientRole == ClientRole.Owner, cancellationToken);
         if (!isOwner) return Forbid();
-        if (!IsValid(request))
-            return BadRequest(new { message = "Check the billing name, tax ID, email addresses, and address lengths." });
+        var validation = await validator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
         client.LegalName = Clean(request.LegalName);
         client.TaxId = Clean(request.TaxId);
         client.BillingEmails = Clean(request.BillingEmails);
@@ -51,17 +54,6 @@ public sealed class ClientBillingController(ClientHubDbContext db) : ControllerB
         if (!await db.Users.AnyAsync(user => user.Id == userId && user.ClientId == clientId, cancellationToken))
             return null;
         return await db.Clients.SingleOrDefaultAsync(client => client.Id == clientId, cancellationToken);
-    }
-
-    private static bool IsValid(BillingDetailsRequest request)
-    {
-        if (request.LegalName?.Length > 160 || request.TaxId?.Length > 80 ||
-            request.BillingEmails?.Length > 500 || request.BillingAddress?.Length > 1000)
-            return false;
-        if (string.IsNullOrWhiteSpace(request.BillingEmails)) return true;
-        var emails = request.BillingEmails.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return emails.Length <= 5 && emails.All(email =>
-            MailAddress.TryCreate(email, out var address) && string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? Clean(string? value) =>

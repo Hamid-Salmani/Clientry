@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 
 namespace ClientHub.Api.Controllers;
 
@@ -18,7 +19,8 @@ public sealed class ProjectsController(
     ClientHubDbContext db,
     IHubContext<ProjectHub> hub,
     IEmailSender emailSender,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    IValidator<ProjectsController.AddCommentRequest> commentValidator) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List(
@@ -332,11 +334,9 @@ public sealed class ProjectsController(
     {
         var project = await db.Projects.SingleOrDefaultAsync(x => x.Id == projectId, cancellationToken);
         if (project is null) return NotFound();
-        if (string.IsNullOrWhiteSpace(request.Body) || request.Body.Length > 5000)
-            return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
-            {
-                ["body"] = ["Comment is required (max 5,000 characters)."]
-            }));
+        var validation = await commentValidator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var authorId)) return Unauthorized();
         var comment = new Comment
         {
@@ -364,8 +364,9 @@ public sealed class ProjectsController(
             x => x.Id == commentId && x.ProjectId == projectId, cancellationToken);
         if (comment is null) return NotFound();
         if (!CanManageComment(comment.AuthorId)) return Forbid();
-        if (string.IsNullOrWhiteSpace(request.Body) || request.Body.Length > 5000)
-            return BadRequest(new { message = "Comment is required (max 5,000 characters)." });
+        var validation = await commentValidator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
         var project = await db.Projects.SingleAsync(x => x.Id == projectId, cancellationToken);
         comment.Body = request.Body.Trim();
         var actorId = GetActorId();

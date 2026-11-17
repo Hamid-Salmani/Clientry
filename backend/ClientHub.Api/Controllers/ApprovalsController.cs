@@ -3,6 +3,7 @@ using System.Security.Claims;
 using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
+using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,8 @@ namespace ClientHub.Api.Controllers;
 public sealed class ApprovalsController(
     ClientHubDbContext db,
     IEmailSender emailSender,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    IValidator<ApprovalsController.ApprovalDecisionRequest> decisionValidator) : ControllerBase
 {
     [HttpGet("/api/approvals")]
     public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20,
@@ -89,14 +91,13 @@ public sealed class ApprovalsController(
     public async Task<IActionResult> Decide(Guid projectId, Guid milestoneId, ApprovalDecisionRequest request,
         CancellationToken cancellationToken)
     {
+        var validation = await decisionValidator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
         if (!Enum.TryParse<MilestoneApprovalStatus>(request.Decision, true, out var decision) ||
             decision is not (MilestoneApprovalStatus.Approved or MilestoneApprovalStatus.ChangesRequested))
             return BadRequest(new { message = "Choose Approved or ChangesRequested." });
         var note = request.Note?.Trim();
-        if (decision == MilestoneApprovalStatus.ChangesRequested && string.IsNullOrWhiteSpace(note))
-            return BadRequest(new { message = "A note is required when requesting changes." });
-        if (note?.Length > 2000)
-            return BadRequest(new { message = "The decision note must be at most 2,000 characters." });
 
         var milestone = await db.Milestones.Include(item => item.Project)
             .SingleOrDefaultAsync(item => item.Id == milestoneId && item.ProjectId == projectId, cancellationToken);

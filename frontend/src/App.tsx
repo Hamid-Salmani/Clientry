@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { HubConnectionBuilder } from '@microsoft/signalr'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
+import { z } from 'zod'
 import './App.css'
 
 const AdminCharts = lazy(() => import('./AdminCharts'))
@@ -74,6 +75,54 @@ type NotificationPreferences = {
   emailWorkspaceUpdates: boolean; emailComments: boolean; emailApprovals: boolean; emailInvoiceReminders: boolean; emailRequestUpdates: boolean
 }
 type AdminWorkspaceSettings = { name: string; supportEmail: string }
+
+const loginSchema = z.object({
+  email: z.email('Enter a valid email address.').max(254, 'Email must be 254 characters or fewer.'),
+  password: z.string().min(1, 'Enter your password.'),
+})
+const registrationSchema = loginSchema.extend({
+  fullName: z.string().trim().min(1, 'Enter your name.').max(120, 'Name must be 120 characters or fewer.'),
+  password: z.string().min(8, 'Your password must be at least 8 characters.'),
+})
+const profileSchema = z.object({ fullName: z.string().trim().min(1, 'Enter your name.').max(120, 'Name must be 120 characters or fewer.') })
+const passwordSchema = z.object({
+  currentPassword: z.string().min(1, 'Enter your current password.'),
+  newPassword: z.string().min(8, 'Your new password must be at least 8 characters.'),
+})
+const billingSchema = z.object({
+  legalName: z.string().max(160, 'Legal name must be 160 characters or fewer.'),
+  taxId: z.string().max(80, 'Tax ID must be 80 characters or fewer.'),
+  billingEmails: z.string().max(500, 'Billing emails must be 500 characters or fewer.').refine((value) => {
+    const emails = value.split(/[;,]/).map((email) => email.trim()).filter(Boolean)
+    return emails.length <= 5 && emails.every((email) => z.email().safeParse(email).success)
+  }, 'Enter up to five valid billing email addresses.'),
+  billingAddress: z.string().max(1000, 'Billing address must be 1,000 characters or fewer.'),
+})
+const teamInvitationSchema = z.object({
+  fullName: z.string().trim().min(1, 'Enter your colleague’s name.').max(120, 'Name must be 120 characters or fewer.'),
+  email: z.email('Enter a valid email address.').max(254, 'Email must be 254 characters or fewer.'),
+})
+const projectRequestSchema = z.object({
+  title: z.string().trim().min(1, 'Enter a request title.').max(160, 'Title must be 160 characters or fewer.'),
+  description: z.string().trim().min(1, 'Describe the work you need.').max(4000, 'Description must be 4,000 characters or fewer.'),
+  priority: z.enum(['Low', 'Normal', 'High']),
+  files: z.array(z.instanceof(File)).max(3, 'You can attach up to three files.').refine(
+    (files) => files.every((file) => file.size > 0 && file.size <= 10 * 1024 * 1024),
+    'Each attachment must be 10 MB or smaller.',
+  ),
+})
+const approvalDecisionSchema = z.object({
+  decision: z.enum(['Approved', 'ChangesRequested']),
+  note: z.string().trim().max(2000, 'The note must be 2,000 characters or fewer.'),
+}).refine((value) => value.decision !== 'ChangesRequested' || value.note.length > 0, {
+  path: ['note'],
+  message: 'A note is required when requesting changes.',
+})
+const requestDecisionSchema = z.object({
+  status: z.enum(['Accepted', 'Declined']),
+  note: z.string().trim().min(1, 'Add a response for the client.').max(2000, 'The response must be 2,000 characters or fewer.'),
+})
+const commentSchema = z.object({ body: z.string().trim().min(1, 'Write an update before sending.').max(5000, 'Updates must be 5,000 characters or fewer.') })
 
 const apiBase = import.meta.env.VITE_API_URL ?? ''
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? ''
@@ -395,16 +444,20 @@ function App() {
   }
 
   async function saveProfileName(fullName: string) {
+    const parsed = profileSchema.safeParse({ fullName })
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Check your name.')
     const updated = await request<{ fullName: string }>('/auth/profile', token, {
-      method: 'PUT', body: JSON.stringify({ fullName }),
+      method: 'PUT', body: JSON.stringify(parsed.data),
     })
     setUser((current) => current ? { ...current, name: updated.fullName } : current)
     await queryClient.invalidateQueries({ queryKey: ['profile', token] })
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {
+    const parsed = passwordSchema.safeParse({ currentPassword, newPassword })
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Check your password.')
     const result = await request<{ accessToken: string }>('/auth/change-password', token, {
-      method: 'POST', body: JSON.stringify({ currentPassword, newPassword }),
+      method: 'POST', body: JSON.stringify(parsed.data),
     })
     sessionStorage.setItem('clienthub-token', result.accessToken)
     setToken(result.accessToken)
@@ -430,9 +483,14 @@ function App() {
   async function logIn(event: FormEvent) {
     event.preventDefault()
     setLoginError('')
+    const parsed = loginSchema.safeParse({ email, password })
+    if (!parsed.success) {
+      setLoginError(parsed.error.issues[0]?.message ?? 'Check your sign-in details.')
+      return
+    }
     try {
       const result = await request<{ accessToken: string; name: string; role: User['role'] }>('/auth/login', '', {
-        method: 'POST', body: JSON.stringify({ email, password }),
+        method: 'POST', body: JSON.stringify(parsed.data),
       })
       sessionStorage.setItem('clienthub-token', result.accessToken)
       setUser({ name: result.name, role: result.role })
@@ -447,9 +505,14 @@ function App() {
   async function registerUser(event: FormEvent) {
     event.preventDefault()
     setLoginError('')
+    const parsed = registrationSchema.safeParse({ email, password, fullName })
+    if (!parsed.success) {
+      setLoginError(parsed.error.issues[0]?.message ?? 'Check your account details.')
+      return
+    }
     try {
       const result = await request<{ accessToken: string; name: string; role: User['role'] }>('/auth/register', '', {
-        method: 'POST', body: JSON.stringify({ email, password, fullName }),
+        method: 'POST', body: JSON.stringify(parsed.data),
       })
       sessionStorage.setItem('clienthub-token', result.accessToken)
       setUser({ name: result.name, role: result.role })
@@ -463,13 +526,18 @@ function App() {
 
   async function addComment(event: FormEvent) {
     event.preventDefault()
-    if (!selectedProject || !commentText.trim()) return
+    if (!selectedProject) return
+    const parsed = commentSchema.safeParse({ body: commentText })
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Check your update.')
+      return
+    }
     try {
       const saved = await request<{ id: string }>(`/projects/${selectedProject.id}/comments`, token, {
-        method: 'POST', body: JSON.stringify({ body: commentText }),
+        method: 'POST', body: JSON.stringify(parsed.data),
       })
       setComments((existing) => [...existing, {
-        id: saved.id, authorId: user?.id ?? '', body: commentText, createdAt: new Date().toISOString(), author: user?.name ?? 'You',
+        id: saved.id, authorId: user?.id ?? '', body: parsed.data.body, createdAt: new Date().toISOString(), author: user?.name ?? 'You',
       }])
       setCommentText('')
     } catch (reason) {
@@ -899,10 +967,15 @@ function ClientBilling({ token }: { token: string }) {
   }, [billingQuery.data])
   async function save(event: FormEvent) {
     event.preventDefault()
+    const parsed = billingSchema.safeParse({ legalName, taxId, billingEmails, billingAddress })
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Check your billing details.')
+      return
+    }
     setBusy(true); setError(''); setSaved(false)
     try {
       await request('/me/billing', token, {
-        method: 'PUT', body: JSON.stringify({ legalName, taxId, billingEmails, billingAddress }),
+        method: 'PUT', body: JSON.stringify(parsed.data),
       })
       await billingQuery.refetch()
       setSaved(true)
@@ -944,9 +1017,14 @@ function ClientTeam({ token }: { token: string }) {
 
   async function invite(event: FormEvent) {
     event.preventDefault()
+    const parsed = teamInvitationSchema.safeParse({ fullName, email })
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Check the invitation details.')
+      return
+    }
     setBusy('invite'); setError(''); setNotice('')
     try {
-      await request('/me/team/invitations', token, { method: 'POST', body: JSON.stringify({ fullName, email }) })
+      await request('/me/team/invitations', token, { method: 'POST', body: JSON.stringify(parsed.data) })
       setFullName(''); setEmail('')
       setNotice('Invitation sent. The invitee will receive an email with a secure sign-up link.')
       await queryClient.invalidateQueries({ queryKey: ['client-team', token] })
@@ -1082,11 +1160,16 @@ function Approvals({ items, loading, error, token, onChanged }: {
 
   async function submitDecision(event: FormEvent) {
     event.preventDefault()
-    if (!dialog || (dialog.decision === 'ChangesRequested' && !note.trim())) return
+    if (!dialog) return
+    const parsed = approvalDecisionSchema.safeParse({ decision: dialog.decision, note })
+    if (!parsed.success) {
+      setActionError(parsed.error.issues[0]?.message ?? 'Check the decision details.')
+      return
+    }
     setBusy(true); setActionError('')
     try {
       await request(`/projects/${dialog.item.projectId}/milestones/${dialog.item.id}/approval-decision`, token, {
-        method: 'POST', body: JSON.stringify({ decision: dialog.decision, note: note.trim() || null }),
+        method: 'POST', body: JSON.stringify({ decision: parsed.data.decision, note: parsed.data.note || null }),
       })
       setDialog(null); setNote(''); onChanged()
     } catch (reason) {
@@ -1172,13 +1255,20 @@ function Requests({ token, admin, clients, path, onOpenProject }: {
 
   async function submitRequest(event: FormEvent) {
     event.preventDefault()
+    const parsed = projectRequestSchema.safeParse({ title, description, priority, files })
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Check the request details.')
+      return
+    }
     setBusy(true); setError('')
     try {
       const created = await request<{ id: string }>('/requests', token, {
-        method: 'POST', body: JSON.stringify({ title, description, priority }),
+        method: 'POST', body: JSON.stringify({
+          title: parsed.data.title, description: parsed.data.description, priority: parsed.data.priority,
+        }),
       })
       try {
-        await uploadAttachments(created.id, files)
+        await uploadAttachments(created.id, parsed.data.files)
       } catch (reason) {
         setError(`Your request was saved, but an attachment could not be uploaded: ${reason instanceof Error ? reason.message : 'Upload failed.'}`)
       }
@@ -1202,8 +1292,13 @@ function Requests({ token, admin, clients, path, onOpenProject }: {
         return
       }
       if (action === 'decision' && nextDecision) {
+        const parsed = requestDecisionSchema.safeParse({ status: nextDecision, note })
+        if (!parsed.success) {
+          setError(parsed.error.issues[0]?.message ?? 'Check the response.')
+          return
+        }
         await request(`/admin/requests/${detailId}/decision`, token, {
-          method: 'PATCH', body: JSON.stringify({ status: nextDecision, note }),
+          method: 'PATCH', body: JSON.stringify(parsed.data),
         })
         setDecision(null); setNote('')
       }
