@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace ClientHub.Tests;
 
@@ -190,6 +191,39 @@ public sealed class DomainAndIsolationTests
 
             Assert.Equal(unrelatedHash, users["other@example.com"].PasswordHash);
         }
+    }
+
+    [Fact]
+    public async Task CurrentUserProfileReturnsItsAssignedClientWorkspaceAndSupportContact()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Assigned Client", Notes = "" };
+        var userId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(client.Id, userId, true));
+        await db.Database.EnsureCreatedAsync();
+        db.Clients.Add(client);
+        db.WorkspaceSettings.Add(new WorkspaceSettings { Name = "Agency Workspace", SupportEmail = "help@example.test" });
+        await db.SaveChangesAsync();
+
+        var controller = CreateAuthController(db);
+        var identity = new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim(ClaimTypes.Name, "Client User"),
+            new Claim(ClaimTypes.Role, "Client"),
+            new Claim("client_id", client.Id.ToString())
+        ], "test");
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+        };
+
+        var result = Assert.IsType<OkObjectResult>(await controller.Me(CancellationToken.None));
+        using var profile = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
+        Assert.Equal("Assigned Client", profile.RootElement.GetProperty("workspaceName").GetString());
+        Assert.Equal("help@example.test", profile.RootElement.GetProperty("supportEmail").GetString());
     }
 
     [Fact]

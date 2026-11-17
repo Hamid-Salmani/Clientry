@@ -13,6 +13,7 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - Invoice administration supports draft creation/editing/deletion, valid status transitions, verified-payment-only completion, PDF downloads, and CSV export.
 - User-scoped notifications provide paged retrieval, read/unread controls, and account-persisted workspace-update and invoice-reminder preferences; project and invoice changes generate notifications according to those preferences.
 - Administrators can persist the workspace display name and support email; client settings remain personal to their account.
+- Client workspace names and support contacts shown in the profile and overview are loaded from the authenticated account and saved workspace configuration; the sign-in page uses illustrative branding rather than sample project records.
 - The dashboard uses database-side counts and a six-month payment window; project, invoice, file, comment, activity, invitation, client, and notification collections support bounded pagination, with search or sorting where applicable.
 - React + TypeScript frontend for client and admin workspaces, project detail, conversations, files, invoices, client management, invoice administration, and persisted workspace settings.
 - Clients can upload/download project files and manage their own files and comments; administrators can manage all project files and comments. Live comment updates are shared with project participants.

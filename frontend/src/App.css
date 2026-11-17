@@ -359,6 +359,7 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .art-card-head { display: flex; align-items: center; gap: 7px; margin-bottom: 23px; color: #a3a5b1; font-size: 8px; font-weight: 700; letter-spacing: 1px; }
 .art-card-head span:last-child { margin-left: auto; letter-spacing: 2px; }
 .art-dot { width: 7px; height: 7px; border-radius: 50%; background: #7779d5; }
+.art-brand-mark { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 16px; border-radius: 13px; background: #7779d5; color: white; font: 700 28px 'Manrope', sans-serif; }
 .art-card > strong { display: block; color: #343847; font: 700 16px 'Manrope', sans-serif; }
 .art-card > small { display: block; margin-top: 6px; color: #9a9da8; font-size: 9px; }
 .art-progress { height: 5px; margin-top: 21px; border-radius: 8px; background: #eeeef7; }
@@ -369,6 +370,7 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .check-pending { color: #9da0aa; }
 .art-note { position: absolute; z-index: 2; top: 61%; left: 12%; display: flex; align-items: center; gap: 8px; max-width: 280px; border: 1px solid #fff; border-radius: 9px; padding: 10px 12px; background: white; box-shadow: 0 9px 30px #45497818; transform: rotate(2deg); }
 .note-avatar { width: 24px; height: 24px; display: grid; flex: none; place-items: center; border-radius: 50%; background: #f1e8dc; color: #9c7658; font-size: 9px; font-weight: 700; }
+.note-avatar .icon { width: 13px; height: 13px; }
 .art-note strong { color: #545867; font-size: 8px; }
 .art-note p { max-width: 174px; margin-top: 3px; color: #8e929e; font-size: 8px; line-height: 1.4; }
 .note-time { align-self: flex-start; color: #a5a8b2; font-size: 7px; }

@@ -8,7 +8,7 @@ import { loadStripe } from '@stripe/stripe-js'
 import './App.css'
 
 const AdminCharts = lazy(() => import('./AdminCharts'))
-type User = { id?: string; name: string; role: 'Admin' | 'Client' }
+type User = { id?: string; name: string; role: 'Admin' | 'Client'; workspaceName?: string; supportEmail?: string }
 type Project = {
   id: string
   name: string
@@ -89,8 +89,8 @@ function Icon({ name }: { name: string }) {
 function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('clienthub-token') ?? '')
   const [user, setUser] = useState<User | null>(null)
-  const [email, setEmail] = useState('clientA@demo.com')
-  const [password, setPassword] = useState('DemoPass!234')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   const [loginError, setLoginError] = useState('')
   const [isRegisterMode, setIsRegisterMode] = useState(false)
@@ -136,7 +136,8 @@ function App() {
             : 'Overview'
 
   const admin = user?.role === 'Admin'
-  const workspaceName = admin ? workspaceSettings.name : 'Northstar Studio'
+  const workspaceName = admin ? workspaceSettings.name : user?.workspaceName ?? 'Client workspace'
+  const supportEmail = admin ? workspaceSettings.supportEmail : user?.supportEmail ?? ''
   const changeTheme = (lightMode: boolean) => {
     const nextTheme = lightMode ? 'light' : 'dark'
     localStorage.setItem('clientry-theme', nextTheme)
@@ -180,7 +181,7 @@ function App() {
 
   const profileQuery = useQuery({
     queryKey: ['profile', token],
-    queryFn: () => request<{ id: string; name: string; role: User['role'] }>('/auth/me', token),
+    queryFn: () => request<{ id: string; name: string; role: User['role']; workspaceName: string; supportEmail: string }>('/auth/me', token),
     enabled: Boolean(token),
   })
   const workspaceQuery = useQuery({
@@ -223,7 +224,10 @@ function App() {
 
   useEffect(() => {
     if (!profileQuery.data) return
-    setUser({ id: profileQuery.data.id, name: profileQuery.data.name, role: profileQuery.data.role })
+    setUser({
+      id: profileQuery.data.id, name: profileQuery.data.name, role: profileQuery.data.role,
+      workspaceName: profileQuery.data.workspaceName, supportEmail: profileQuery.data.supportEmail,
+    })
   }, [profileQuery.data])
 
   useEffect(() => {
@@ -500,7 +504,7 @@ function App() {
           {selectedProject ? (
             <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => navigateTo('Projects')} />
           ) : activePage === 'Overview' ? (
-            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
+            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} supportEmail={supportEmail} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
           ) : activePage === 'Projects' ? (
             <Projects projects={projects} onOpenProject={openProject} />
           ) : activePage === 'Invoices' ? (
@@ -534,7 +538,7 @@ function Login({ email, setEmail, password, setPassword, fullName, setFullName, 
           <input id="fullName" type="text" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} required />
         </>}
         <label htmlFor="email">Email address</label><input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
-        <div className="password-label"><label htmlFor="password">Password</label><span>{isRegisterMode ? 'Use 8+ characters' : 'Demo: DemoPass!234'}</span></div>
+        <div className="password-label"><label htmlFor="password">Password</label><span>{isRegisterMode ? 'Use 8+ characters' : 'Enter your password'}</span></div>
         <input id="password" type="password" autoComplete={isRegisterMode ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} required />
         {error && <div className="login-error" role="alert">{error}</div>}
         <button className="primary-button login-submit" type="submit">{isRegisterMode ? 'Create account' : 'Sign in'} <Icon name="arrow" /></button>
@@ -545,7 +549,7 @@ function Login({ email, setEmail, password, setPassword, fullName, setFullName, 
       <div className="login-demo"><span>Try a demo workspace</span><div><button type="button" onClick={() => { setEmail('clientA@demo.com'); setPassword('DemoPass!234'); setIsRegisterMode(false) }}>Client portal</button><button type="button" onClick={() => { setEmail('admin@demo.com'); setPassword('DemoPass!234'); setIsRegisterMode(false) }}>Agency admin</button></div></div>
       <p className="login-footer">Secure client collaboration, made simple.</p>
     </section>
-    <aside className="login-art" aria-hidden="true"><div className="art-glow" /><div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" /><div className="art-card"><div className="art-card-head"><span className="art-dot" /><span>PROJECT OVERVIEW</span><span>•••</span></div><strong>Brand identity refresh</strong><small>Northstar Studio · Due Dec 12</small><div className="art-progress"><i /></div><div className="art-progress-label"><span>Project progress</span><b>50%</b></div><div className="art-checks"><span>✓ &nbsp; Discovery & strategy</span><span>✓ &nbsp; Visual directions</span><span className="check-pending">◌ &nbsp; Identity system</span></div></div><div className="art-note"><span className="note-avatar">A</span><div><strong>Alex Morgan</strong><p>The first visual directions are ready for review.</p></div><span className="note-time">now</span></div><div className="art-stamp">Thoughtfully<br />connected.</div></aside>
+    <aside className="login-art" aria-hidden="true"><div className="art-glow" /><div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" /><div className="art-card"><div className="art-card-head"><span className="art-dot" /><span>CLIENTRY WORKSPACE</span></div><div className="art-brand-mark">c</div><strong>Good work, connected.</strong><small>Projects, conversations, files, and invoices.</small><div className="art-progress"><i /></div><div className="art-progress-label"><span>One shared workspace</span></div></div><div className="art-note"><span className="note-avatar"><Icon name="layers" /></span><div><strong>Everything in one place</strong><p>Keep projects and updates together.</p></div></div><div className="art-stamp">Thoughtfully<br />connected.</div></aside>
   </main>
 }
 
@@ -651,8 +655,8 @@ function Account({ user, workspaceName, onSignOut }: { user: User; workspaceName
   </div>
 }
 
-function Overview({ greeting, admin, projects, invoices, metrics, onOpenProject, onOpenProjects, onOpenInvoices, onCreateProject }: {
-  greeting: string; admin: boolean; projects: Project[]; invoices: Invoice[]; metrics: Metrics | null
+function Overview({ greeting, admin, projects, invoices, metrics, supportEmail, onOpenProject, onOpenProjects, onOpenInvoices, onCreateProject }: {
+  greeting: string; admin: boolean; projects: Project[]; invoices: Invoice[]; metrics: Metrics | null; supportEmail: string
   onOpenProject: (project: Project) => void; onOpenProjects: () => void; onOpenInvoices: () => void; onCreateProject: () => void
 }) {
   const active = projects.filter((project) => project.status !== 'Archived')
@@ -678,7 +682,7 @@ function Overview({ greeting, admin, projects, invoices, metrics, onOpenProject,
       {admin && metrics?.recentActivity && <section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>The latest updates from your workspace.</p></div><span className="activity-live"><i /> Live</span></div><div className="activity-list">{metrics.recentActivity.map((item, index) => <div className="activity-item" key={`${item.createdAt}-${index}`}><div className="activity-mark">{index === 0 ? '✦' : '↗'}</div><div><strong>{item.action}</strong><span>{item.metadata}</span></div><time>{relativeDate(item.createdAt)}</time></div>)}</div></section>}
     </div>
     {admin && metrics && <Suspense fallback={<div className="chart-loading" aria-label="Loading charts" />}><AdminCharts metrics={metrics} /></Suspense>}
-    <footer className="page-footer"><span>Made for good work.</span><span>Need a hand? <a href="mailto:hello@clientry.app">Talk to your team</a></span></footer>
+    <footer className="page-footer"><span>Made for good work.</span>{supportEmail && <span>Need a hand? <a href={`mailto:${supportEmail}`}>Contact support</a></span>}</footer>
   </div>
 }
 

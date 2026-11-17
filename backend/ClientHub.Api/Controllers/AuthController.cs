@@ -294,12 +294,24 @@ public sealed class AuthController(
 
     [HttpGet("me")]
     [Authorize]
-    public IActionResult Me() => Ok(new
+    public async Task<IActionResult> Me(CancellationToken cancellationToken)
     {
-        id = User.FindFirstValue(ClaimTypes.NameIdentifier),
-        name = User.Identity?.Name,
-        role = User.FindFirstValue(ClaimTypes.Role)
-    });
+        var clientId = Guid.TryParse(User.FindFirstValue("client_id"), out var parsedClientId)
+            ? parsedClientId
+            : (Guid?)null;
+        var clientName = clientId.HasValue
+            ? await db.Clients.Where(x => x.Id == clientId.Value).Select(x => x.CompanyName).SingleOrDefaultAsync(cancellationToken)
+            : null;
+        var settings = await db.WorkspaceSettings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+        return Ok(new
+        {
+            id = User.FindFirstValue(ClaimTypes.NameIdentifier),
+            name = User.Identity?.Name,
+            role = User.FindFirstValue(ClaimTypes.Role),
+            workspaceName = clientName ?? "Client workspace",
+            supportEmail = settings?.SupportEmail ?? "support@studionorth.example"
+        });
+    }
 
     private async Task<User?> GetCurrentUserAsync(CancellationToken cancellationToken)
     {
