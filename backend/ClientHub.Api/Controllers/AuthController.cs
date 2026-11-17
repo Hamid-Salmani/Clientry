@@ -6,6 +6,7 @@ using ClientHub.Api.Services;
 using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
+using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +23,10 @@ public sealed class AuthController(
     IConfiguration configuration,
     IWebHostEnvironment environment,
     IEmailSender emailSender,
-    ILogger<AuthController> logger) : ControllerBase
+    ILogger<AuthController> logger,
+    IValidator<AuthController.RegisterRequest> registerValidator,
+    IValidator<AuthController.ChangePasswordRequest> changePasswordValidator,
+    IValidator<AuthController.UpdateProfileRequest> updateProfileValidator) : ControllerBase
 {
     private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(30);
@@ -65,16 +69,14 @@ public sealed class AuthController(
     {
         if (!configuration.GetValue<bool>("Auth:AllowSelfRegistration"))
             return NotFound(new { message = "Self-registration is disabled." });
-        if (request is null || string.IsNullOrWhiteSpace(request.Email) ||
-            string.IsNullOrWhiteSpace(request.Password) || string.IsNullOrWhiteSpace(request.FullName))
-            return BadRequest(new { message = "Name, email, and password are required." });
+        var validation = await registerValidator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
 
         var email = NormalizeEmail(request.Email);
         var fullName = request.FullName.Trim();
         if (!IsValidEmail(email))
             return BadRequest(new { message = "A valid email is required." });
-        if (fullName.Length > 120 || request.Password.Length < 8)
-            return BadRequest(new { message = "Name must be at most 120 characters and password at least 8 characters." });
         if (await db.Users.AnyAsync(x => x.Email.ToLower() == email, cancellationToken))
             return Conflict(new { message = "An account with this email already exists." });
 
@@ -218,11 +220,12 @@ public sealed class AuthController(
     {
         var user = await GetCurrentUserAsync(cancellationToken);
         if (user is null) return Unauthorized();
+        var validation = await changePasswordValidator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
         var hasher = new PasswordHasher<User>();
         if (hasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword) == PasswordVerificationResult.Failed)
             return BadRequest(new { message = "Current password is incorrect." });
-        if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
-            return BadRequest(new { message = "Password must be at least 8 characters long." });
 
         user.PasswordHash = hasher.HashPassword(user, request.NewPassword);
         var now = DateTime.UtcNow;
@@ -296,9 +299,11 @@ public sealed class AuthController(
     [Authorize]
     public async Task<IActionResult> UpdateProfile(UpdateProfileRequest request, CancellationToken cancellationToken)
     {
+        var validation = await updateProfileValidator.ValidateAsync(request, cancellationToken);
+        if (!validation.IsValid)
+            return ValidationProblem(new ValidationProblemDetails(validation.ToDictionary()));
         var fullName = request.FullName?.Trim();
-        if (string.IsNullOrWhiteSpace(fullName) || fullName.Length > 120)
-            return BadRequest(new { message = "Name is required and must be at most 120 characters." });
+        if (string.IsNullOrWhiteSpace(fullName)) return BadRequest(new { message = "Name is required." });
         var user = await GetCurrentUserAsync(cancellationToken);
         if (user is null) return Unauthorized();
         user.FullName = fullName;

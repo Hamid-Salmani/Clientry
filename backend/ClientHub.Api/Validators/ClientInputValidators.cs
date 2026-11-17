@@ -76,3 +76,30 @@ public sealed class ProjectRequestDecisionValidator : AbstractValidator<ProjectR
             .WithMessage("A response of at most 2,000 characters is required.");
     }
 }
+
+public sealed class RegisterValidator : AbstractValidator<AuthController.RegisterRequest>
+{
+    public RegisterValidator()
+    {
+        RuleFor(request => request.Email).NotEmpty().MaximumLength(254).EmailAddress();
+        RuleFor(request => request.Password).NotEmpty().MinimumLength(8);
+        RuleFor(request => request.FullName).NotEmpty().MaximumLength(120);
+    }
+}
+
+public sealed class ChangePasswordValidator : AbstractValidator<AuthController.ChangePasswordRequest>
+{
+    public ChangePasswordValidator()
+    {
+        RuleFor(request => request.CurrentPassword).NotEmpty();
+        RuleFor(request => request.NewPassword).NotEmpty().MinimumLength(8);
+    }
+}
+
+public sealed class UpdateProfileValidator : AbstractValidator<AuthController.UpdateProfileRequest>
+{
+    public UpdateProfileValidator()
+    {
+        RuleFor(request => request.FullName).NotEmpty().MaximumLength(120);
+    }
+}

@@ -990,7 +990,8 @@ public sealed class DomainAndIsolationTests
             ["Jwt:Audience"] = "ClientHub"
         }).Build();
         return new AuthController(db, configuration, new TestEnvironment(), new UnusedEmailSender(),
-            NullLogger<AuthController>.Instance);
+            NullLogger<AuthController>.Instance, new RegisterValidator(), new ChangePasswordValidator(),
+            new UpdateProfileValidator());
     }
 
     private sealed class UnusedEmailSender : IEmailSender
