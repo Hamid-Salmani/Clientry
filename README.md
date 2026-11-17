@@ -70,12 +70,14 @@ Client identity is issued as a signed `client_id` JWT claim. The scoped request 
 
 Admin-only endpoints require the Admin role. SignalR project membership is checked against the same filtered project query before a connection is added to its group. Payment status is changed only after Stripe signature verification and amount/currency checks. Production deployments must configure a random `Jwt__SigningKey`, HTTPS, SMTP, and Stripe secrets outside source control.
 
+Authentication supports administrator-issued, seven-day invitations, one-time password reset links, password changes, profile updates, logout, and rotating 30-day refresh tokens. Only token hashes are persisted; access JWTs expire after 15 minutes. Open self-registration is disabled unless `Auth__AllowSelfRegistration=true`. Invitation and password-reset emails use the configured SMTP server; set `FRONTEND_BASE_URL` to the deployed client URL.
+
 ## Initial audit
 
 - **Exists:** The backend is split into domain, application, infrastructure, and API projects; EF Core migrations manage SQLite; JWT roles and login lockout protect API routes; client-owned projects, milestones, files, comments, invoices, invoice lines, payments, notifications, and activity are filtered; SignalR checks project access before group membership; Stripe webhooks validate signatures, amount, and currency.
 - **Weak, corrected:** Client requests previously had no global filters for users, clients, or invitations, and a client scope missing its `client_id` could match nullable ownership. Filters now cover those entities and fail closed when the claim is absent; the isolation test covers both client separation and missing claims.
 - **Weak:** Uploads are limited to PDF, PNG, JPEG, and TXT. Image/PDF signatures are checked, but TXT previously accepted arbitrary binary data. SignalR relies on the global project filter without an explicit client-claim check in the hub, the dashboard loads invoice/project rows into memory, and the login access token lasts two hours.
-- **Missing:** Invitation lifecycle, refresh/logout and password recovery, complete admin CRUD, project/milestone management, notifications API and server-side preferences, workspace settings, invoice editing/numbering/export, pagination/search, and the production-grade frontend flows described in the feature requirements.
+- **Missing:** Complete admin CRUD, project/milestone management, notifications API and server-side preferences, workspace settings, invoice editing/numbering/export, pagination/search, and the production-grade frontend flows described in the feature requirements.
 
 ## Design decisions and assumptions
 
@@ -83,8 +85,9 @@ Admin-only endpoints require the Admin role. SignalR project membership is check
 - One client organization is assigned per client user in the demo; the `Client` entity may own multiple user accounts.
 - Invoice currency is currently restricted to USD so Stripe's minor-unit conversion is explicit.
 - The default development JWT key is only a local convenience; production fails startup if a key is not configured.
+- Self-registration is off by default; client accounts should be created by invitation. Refresh tokens last 30 days and password reset links last one hour.
 - The generated UI is intentionally quiet and information-dense: understated indigo accents, readable status, responsive layouts, and reduced-motion support.
 
 ## Current limitations
 
-This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Invitation acceptance, refresh/logout and password recovery flows, email queue/retries and reminders, admin edit/deactivate workflows, CSV export, full pagination/search/sorting, and end-to-end Docker validation are not implemented yet. Mailpit is present in Compose but no email is currently sent. Docker is needed to verify the composed stack and is not available in the authoring environment.
+This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and reminders, admin edit/deactivate workflows, CSV export, full pagination/search/sorting, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.

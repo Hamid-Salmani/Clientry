@@ -7,8 +7,15 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__ClientHub: "Data Source=/data/clienthub.db"
       Jwt__SigningKey: "${JWT_SIGNING_KEY:-local-demo-signing-key-change-before-use-123}"
+      Auth__AllowSelfRegistration: "${AUTH_ALLOW_SELF_REGISTRATION:-false}"
       Stripe__SecretKey: "${STRIPE_SECRET_KEY:-}"
       Stripe__WebhookSecret: "${STRIPE_WEBHOOK_SECRET:-}"
+      Smtp__Host: "${SMTP_HOST:-mailpit}"
+      Smtp__Port: "${SMTP_PORT:-1025}"
+      Smtp__Username: "${SMTP_USERNAME:-}"
+      Smtp__Password: "${SMTP_PASSWORD:-}"
+      Smtp__From: "${SMTP_FROM:-hello@clientry.local}"
+      Frontend__BaseUrl: "${FRONTEND_BASE_URL:-http://localhost:5173}"
       Storage__Path: /data/files
       Cors__Origins__0: http://localhost:5173
     volumes:

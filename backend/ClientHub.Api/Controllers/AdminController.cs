@@ -1,16 +1,97 @@
 using ClientHub.Domain;
+using ClientHub.Application;
+using ClientHub.Api.Services;
 using ClientHub.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
 
 namespace ClientHub.Api.Controllers;
 
 [ApiController]
 [Authorize(Roles = "Admin")]
 [Route("api/admin")]
-public sealed class AdminController(ClientHubDbContext db) : ControllerBase
+public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSender, IConfiguration configuration) : ControllerBase
 {
+    [HttpPost("clients/{clientId:guid}/invitations")]
+    public async Task<IActionResult> InviteClientUser(Guid clientId, InvitationRequest request, CancellationToken cancellationToken)
+    {
+        var client = await db.Clients.SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
+        if (client is null) return NotFound();
+        if (!TryNormalizeEmail(request.Email, out var email) ||
+            string.IsNullOrWhiteSpace(request.FullName) || request.FullName.Trim().Length > 120)
+            return BadRequest(new { message = "A valid email and name of at most 120 characters are required." });
+        if (await db.Users.AnyAsync(x => x.Email.ToLower() == email, cancellationToken))
+            return Conflict(new { message = "An account with this email already exists." });
+
+        var now = DateTime.UtcNow;
+        var pending = await db.Invitations.SingleOrDefaultAsync(x =>
+            x.ClientId == clientId && x.Email.ToLower() == email && !x.AcceptedAt.HasValue &&
+            !x.RevokedAt.HasValue && x.ExpiresAt > now, cancellationToken);
+        if (pending is not null)
+            return Conflict(new { message = "A pending invitation already exists for this email." });
+
+        var token = TokenSecurity.CreateToken();
+        var invitation = new Invitation
+        {
+            Email = email,
+            FullName = request.FullName.Trim(),
+            TokenHash = TokenSecurity.HashToken(token),
+            ClientId = clientId,
+            ExpiresAt = now.AddDays(7)
+        };
+        db.Invitations.Add(invitation);
+        await db.SaveChangesAsync(cancellationToken);
+        await SendInvitationAsync(invitation, client.CompanyName, token, cancellationToken);
+        return CreatedAtAction(nameof(ListInvitations), new { clientId }, new { invitation.Id, invitation.Email, invitation.FullName, invitation.ExpiresAt });
+    }
+
+    [HttpGet("clients/{clientId:guid}/invitations")]
+    public async Task<IActionResult> ListInvitations(Guid clientId, CancellationToken cancellationToken)
+    {
+        if (!await db.Clients.AnyAsync(x => x.Id == clientId, cancellationToken)) return NotFound();
+        var now = DateTime.UtcNow;
+        var invitations = await db.Invitations.AsNoTracking()
+            .Where(x => x.ClientId == clientId && !x.AcceptedAt.HasValue && !x.RevokedAt.HasValue && x.ExpiresAt > now)
+            .OrderBy(x => x.Email)
+            .Select(x => new { x.Id, x.Email, x.FullName, x.ExpiresAt })
+            .ToListAsync(cancellationToken);
+        return Ok(invitations);
+    }
+
+    [HttpPost("clients/{clientId:guid}/invitations/{invitationId:guid}/resend")]
+    public async Task<IActionResult> ResendInvitation(Guid clientId, Guid invitationId, CancellationToken cancellationToken)
+    {
+        var invitation = await db.Invitations.SingleOrDefaultAsync(x =>
+            x.Id == invitationId && x.ClientId == clientId, cancellationToken);
+        if (invitation is null) return NotFound();
+        if (invitation.AcceptedAt.HasValue || invitation.RevokedAt.HasValue)
+            return Conflict(new { message = "Only pending invitations can be resent." });
+
+        var client = await db.Clients.SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
+        if (client is null) return NotFound();
+        var token = TokenSecurity.CreateToken();
+        invitation.TokenHash = TokenSecurity.HashToken(token);
+        invitation.ExpiresAt = DateTime.UtcNow.AddDays(7);
+        await db.SaveChangesAsync(cancellationToken);
+        await SendInvitationAsync(invitation, client.CompanyName, token, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("clients/{clientId:guid}/invitations/{invitationId:guid}")]
+    public async Task<IActionResult> RevokeInvitation(Guid clientId, Guid invitationId, CancellationToken cancellationToken)
+    {
+        var invitation = await db.Invitations.SingleOrDefaultAsync(x =>
+            x.Id == invitationId && x.ClientId == clientId, cancellationToken);
+        if (invitation is null) return NotFound();
+        if (invitation.AcceptedAt.HasValue || invitation.RevokedAt.HasValue)
+            return Conflict(new { message = "Only pending invitations can be revoked." });
+        invitation.RevokedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("clients")]
     public async Task<IActionResult> Clients(CancellationToken cancellationToken)
     {
@@ -58,4 +139,22 @@ public sealed class AdminController(ClientHubDbContext db) : ControllerBase
                 .Select(x => new { x.Action, x.Metadata, x.CreatedAt }).ToListAsync(cancellationToken)
         });
     }
+
+    private async Task SendInvitationAsync(Invitation invitation, string clientName, string token, CancellationToken cancellationToken)
+    {
+        var baseUrl = (configuration["Frontend:BaseUrl"] ?? "http://localhost:5173").TrimEnd('/');
+        var inviteUrl = $"{baseUrl}/accept-invite/{Uri.EscapeDataString(token)}";
+        await emailSender.SendAsync(invitation.Email, $"You're invited to {clientName}",
+            $"<p>Hello {WebUtility.HtmlEncode(invitation.FullName)},</p><p>You have been invited to join {WebUtility.HtmlEncode(clientName)} on Clientry.</p><p><a href=\"{WebUtility.HtmlEncode(inviteUrl)}\">Accept invitation</a></p><p>This link expires in seven days.</p>",
+            null, cancellationToken);
+    }
+
+    private static bool TryNormalizeEmail(string? value, out string email)
+    {
+        email = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        return email.Length <= 254 && System.Net.Mail.MailAddress.TryCreate(email, out var address) &&
+            string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public sealed record InvitationRequest(string Email, string FullName);
 }

@@ -18,6 +18,7 @@ builder.Host.UseSerilog((context, configuration) =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IRequestScope, RequestScope>();
 builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<InvoicePdfService>();
 builder.Services.AddDbContext<ClientHubDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("ClientHub") ?? "Data Source=clienthub.db"));

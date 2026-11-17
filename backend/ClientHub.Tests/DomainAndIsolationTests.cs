@@ -1,11 +1,17 @@
 using ClientHub.Application;
+using ClientHub.Api.Controllers;
 using ClientHub.Api.Services;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ClientHub.Tests;
 
@@ -69,8 +75,8 @@ public sealed class DomainAndIsolationTests
                 new User { Id = userA, ClientId = clientA.Id, Email = "a@example.test", FullName = "Client A", Role = UserRole.Client, PasswordHash = "hash" },
                 new User { Id = userB, ClientId = clientB.Id, Email = "b@example.test", FullName = "Client B", Role = UserRole.Client, PasswordHash = "hash" },
                 new User { ClientId = null, Email = "admin@example.test", FullName = "Admin", Role = UserRole.Admin, PasswordHash = "hash" },
-                new Invitation { Email = "invite-a@example.test", TokenHash = "hash-a", ClientId = clientA.Id, ExpiresAt = DateTime.UtcNow.AddDays(1) },
-                new Invitation { Email = "invite-b@example.test", TokenHash = "hash-b", ClientId = clientB.Id, ExpiresAt = DateTime.UtcNow.AddDays(1) },
+                new Invitation { Email = "invite-a@example.test", FullName = "Invite A", TokenHash = "hash-a", ClientId = clientA.Id, ExpiresAt = DateTime.UtcNow.AddDays(1) },
+                new Invitation { Email = "invite-b@example.test", FullName = "Invite B", TokenHash = "hash-b", ClientId = clientB.Id, ExpiresAt = DateTime.UtcNow.AddDays(1) },
                 projectA, projectB, invoiceA, invoiceB,
                 new Milestone { ClientId = clientA.Id, ProjectId = projectA.Id, Title = "A milestone", Order = 1 },
                 new Milestone { ClientId = clientB.Id, ProjectId = projectB.Id, Title = "B milestone", Order = 1 },
@@ -169,7 +175,119 @@ public sealed class DomainAndIsolationTests
         }
     }
 
+    [Fact]
+    public async Task InvitationAcceptanceCreatesClientUserOnceAndRejectsExpiredInvitations()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        var client = new Client { CompanyName = "Invited Client", Notes = "" };
+        var inviteToken = TokenSecurity.CreateToken();
+        var expiredToken = TokenSecurity.CreateToken();
+
+        await using (var seed = new ClientHubDbContext(options, new TestScope(null, null, false)))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.AddRange(client,
+                new Invitation
+                {
+                    Email = "new-client@example.test", FullName = "New Client",
+                    TokenHash = TokenSecurity.HashToken(inviteToken), ClientId = client.Id,
+                    ExpiresAt = DateTime.UtcNow.AddDays(1)
+                },
+                new Invitation
+                {
+                    Email = "expired@example.test", FullName = "Expired Client",
+                    TokenHash = TokenSecurity.HashToken(expiredToken), ClientId = client.Id,
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        var controller = CreateAuthController(db);
+        Assert.IsType<OkObjectResult>(await controller.AcceptInvitation(
+            inviteToken, new AuthController.AcceptInvitationRequest("SecurePass!234"), CancellationToken.None));
+
+        var created = await db.Users.SingleAsync(user => user.Email == "new-client@example.test");
+        Assert.Equal(client.Id, created.ClientId);
+        Assert.Equal(UserRole.Client, created.Role);
+        Assert.NotNull((await db.Invitations.SingleAsync(x => x.Email == created.Email)).AcceptedAt);
+        Assert.IsType<NotFoundObjectResult>(await controller.AcceptInvitation(
+            inviteToken, new AuthController.AcceptInvitationRequest("AnotherPass!234"), CancellationToken.None));
+        Assert.IsType<NotFoundObjectResult>(await controller.AcceptInvitation(
+            expiredToken, new AuthController.AcceptInvitationRequest("AnotherPass!234"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RefreshTokenRotationDetectsReuseAndRevokesTheActiveReplacement()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        var user = new User
+        {
+            Email = "refresh@example.test", FullName = "Refresh User", Role = UserRole.Admin,
+            PasswordHash = "hash"
+        };
+        var refreshToken = TokenSecurity.CreateToken();
+
+        await using (var seed = new ClientHubDbContext(options, new TestScope(null, null, false)))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.Users.Add(user);
+            seed.RefreshTokens.Add(new RefreshToken
+            {
+                UserId = user.Id, TokenHash = TokenSecurity.HashToken(refreshToken),
+                ExpiresAt = DateTime.UtcNow.AddDays(1)
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        var controller = CreateAuthController(db);
+        var rotated = Assert.IsType<OkObjectResult>(
+            await controller.Refresh(new AuthController.RefreshRequest(refreshToken), CancellationToken.None));
+        var response = Assert.IsType<AuthController.AuthResponse>(rotated.Value);
+        Assert.NotEqual(refreshToken, response.RefreshToken);
+        Assert.NotNull((await db.RefreshTokens.SingleAsync(x => x.TokenHash == TokenSecurity.HashToken(refreshToken))).RevokedAt);
+
+        Assert.IsType<UnauthorizedObjectResult>(
+            await controller.Refresh(new AuthController.RefreshRequest(refreshToken), CancellationToken.None));
+        var replacement = await db.RefreshTokens.SingleAsync(x => x.TokenHash == TokenSecurity.HashToken(response.RefreshToken));
+        Assert.NotNull(replacement.RevokedAt);
+    }
+
+    private static AuthController CreateAuthController(ClientHubDbContext db)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Jwt:SigningKey"] = "test-signing-key-with-at-least-32-bytes",
+            ["Jwt:Issuer"] = "ClientHub",
+            ["Jwt:Audience"] = "ClientHub"
+        }).Build();
+        return new AuthController(db, configuration, new TestEnvironment(), new UnusedEmailSender(),
+            NullLogger<AuthController>.Instance);
+    }
+
     private sealed record TestScope(Guid? ClientId, Guid? UserId, bool IsClient) : IRequestScope;
+
+    private sealed class TestEnvironment : IWebHostEnvironment
+    {
+        public string ApplicationName { get; set; } = "ClientHub.Tests";
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
+        public string WebRootPath { get; set; } = string.Empty;
+        public string EnvironmentName { get; set; } = "Testing";
+        public string ContentRootPath { get; set; } = string.Empty;
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+    }
+
+    private sealed class UnusedEmailSender : IEmailSender
+    {
+        public Task SendAsync(string recipient, string subject, string htmlBody,
+            IReadOnlyDictionary<string, byte[]>? attachments, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Email is not used by this test.");
+    }
 
     private sealed class UnusedFileStorage : IFileStorage
     {

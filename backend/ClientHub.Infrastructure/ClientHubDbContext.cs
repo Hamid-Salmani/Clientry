@@ -10,6 +10,8 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
     public DbSet<User> Users => Set<User>();
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Milestone> Milestones => Set<Milestone>();
     public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
@@ -24,14 +26,25 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
     {
         modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
         modelBuilder.Entity<Payment>().HasIndex(x => x.StripePaymentIntentId).IsUnique();
+        modelBuilder.Entity<Invitation>().HasIndex(x => x.TokenHash).IsUnique();
+        modelBuilder.Entity<RefreshToken>().HasIndex(x => x.TokenHash).IsUnique();
+        modelBuilder.Entity<PasswordResetToken>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<Client>().HasMany(x => x.Users).WithOne(x => x.Client)
             .HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<RefreshToken>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<PasswordResetToken>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<User>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
         modelBuilder.Entity<Client>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.Id == scope.ClientId));
         modelBuilder.Entity<Invitation>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<RefreshToken>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.UserId.HasValue && x.UserId == scope.UserId));
+        modelBuilder.Entity<PasswordResetToken>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.UserId.HasValue && x.UserId == scope.UserId));
         modelBuilder.Entity<Project>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
         modelBuilder.Entity<Milestone>().HasQueryFilter(x =>
