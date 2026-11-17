@@ -951,25 +951,34 @@ function Account({ user, workspaceName, admin, onBilling, onSaveProfile, onChang
 
 function ClientBilling({ token }: { token: string }) {
   const navigate = useNavigate()
+  type BillingDetails = { legalName?: string; taxId?: string; billingEmails?: string; billingAddress?: string; canEdit: boolean }
   const billingQuery = useQuery({
     queryKey: ['billing-details', token],
-    queryFn: () => request<{ legalName?: string; taxId?: string; billingEmails?: string; billingAddress?: string; canEdit: boolean }>('/me/billing', token),
+    queryFn: () => request<BillingDetails>('/me/billing', token),
     enabled: Boolean(token),
   })
-  const [legalName, setLegalName] = useState('')
-  const [taxId, setTaxId] = useState('')
-  const [billingEmails, setBillingEmails] = useState('')
-  const [billingAddress, setBillingAddress] = useState('')
+  const data = billingQuery.data
+  const error = billingQuery.error instanceof Error ? billingQuery.error.message : 'Unable to load billing details.'
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">ACCOUNT</div><h1>Billing details<span className="heading-period">.</span></h1><p>These details appear on invoices and paid receipts.</p></div><button className="cancel-button" onClick={() => navigate('/account')}>Back to account</button></div>
+    {billingQuery.isError && <div className="alert" role="alert">{error}</div>}
+    {billingQuery.isLoading ? <section className="panel full-panel"><div className="loading-bar" role="status" aria-label="Loading billing details" /></section> :
+      data && <ClientBillingForm key={token} token={token} billing={data} onSaved={() => billingQuery.refetch()} />}
+  </div>
+}
+
+function ClientBillingForm({ token, billing, onSaved }: {
+  token: string
+  billing: { legalName?: string; taxId?: string; billingEmails?: string; billingAddress?: string; canEdit: boolean }
+  onSaved: () => Promise<unknown>
+}) {
+  const [legalName, setLegalName] = useState(billing.legalName ?? '')
+  const [taxId, setTaxId] = useState(billing.taxId ?? '')
+  const [billingEmails, setBillingEmails] = useState(billing.billingEmails ?? '')
+  const [billingAddress, setBillingAddress] = useState(billing.billingAddress ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
-  useEffect(() => {
-    if (!billingQuery.data) return
-    setLegalName(billingQuery.data.legalName ?? '')
-    setTaxId(billingQuery.data.taxId ?? '')
-    setBillingEmails(billingQuery.data.billingEmails ?? '')
-    setBillingAddress(billingQuery.data.billingAddress ?? '')
-  }, [billingQuery.data])
   async function save(event: FormEvent) {
     event.preventDefault()
     const parsed = billingSchema.safeParse({ legalName, taxId, billingEmails, billingAddress })
@@ -982,26 +991,23 @@ function ClientBilling({ token }: { token: string }) {
       await request('/me/billing', token, {
         method: 'PUT', body: JSON.stringify(parsed.data),
       })
-      await billingQuery.refetch()
+      await onSaved()
       setSaved(true)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save billing details.') }
     finally { setBusy(false) }
   }
-  return <div className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">ACCOUNT</div><h1>Billing details<span className="heading-period">.</span></h1><p>These details appear on invoices and paid receipts.</p></div><button className="cancel-button" onClick={() => navigate('/account')}>Back to account</button></div>
+  return <>
     {error && <div className="alert" role="alert">{error}</div>}
-    {billingQuery.isError && <div className="alert" role="alert">{billingQuery.error instanceof Error ? billingQuery.error.message : 'Unable to load billing details.'}</div>}
-    {billingQuery.isLoading ? <section className="panel full-panel"><div className="loading-bar" role="status" aria-label="Loading billing details" /></section> :
-      <form className="panel request-form billing-form" onSubmit={(event) => void save(event)}>
-        <label>Legal name<input value={legalName} onChange={(event) => setLegalName(event.target.value)} maxLength={160} readOnly={!billingQuery.data?.canEdit} /></label>
-        <label>Tax ID<input value={taxId} onChange={(event) => setTaxId(event.target.value)} maxLength={80} readOnly={!billingQuery.data?.canEdit} /></label>
-        <label>Billing email(s)<input type="text" value={billingEmails} onChange={(event) => setBillingEmails(event.target.value)} maxLength={500} placeholder="billing@example.com; finance@example.com" readOnly={!billingQuery.data?.canEdit} /></label>
-        <label>Billing address<textarea value={billingAddress} onChange={(event) => setBillingAddress(event.target.value)} maxLength={1000} rows={4} readOnly={!billingQuery.data?.canEdit} /></label>
-        {saved && <Toast message="Billing details saved." />}
-        {!billingQuery.data?.canEdit && <p className="request-file-hint">Only the client owner can change billing details.</p>}
-        {billingQuery.data?.canEdit && <div className="request-form-actions"><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save billing details'}</button></div>}
-      </form>}
-  </div>
+    <form className="panel request-form billing-form" onSubmit={(event) => void save(event)}>
+      <label>Legal name<input value={legalName} onChange={(event) => setLegalName(event.target.value)} maxLength={160} readOnly={!billing.canEdit} /></label>
+      <label>Tax ID<input value={taxId} onChange={(event) => setTaxId(event.target.value)} maxLength={80} readOnly={!billing.canEdit} /></label>
+      <label>Billing email(s)<input type="text" value={billingEmails} onChange={(event) => setBillingEmails(event.target.value)} maxLength={500} placeholder="billing@example.com; finance@example.com" readOnly={!billing.canEdit} /></label>
+      <label>Billing address<textarea value={billingAddress} onChange={(event) => setBillingAddress(event.target.value)} maxLength={1000} rows={4} readOnly={!billing.canEdit} /></label>
+      {saved && <Toast message="Billing details saved." />}
+      {!billing.canEdit && <p className="request-file-hint">Only the client owner can change billing details.</p>}
+      {billing.canEdit && <div className="request-form-actions"><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save billing details'}</button></div>}
+    </form>
+  </>
 }
 
 function ClientTeam({ token }: { token: string }) {
