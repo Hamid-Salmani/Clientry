@@ -325,6 +325,41 @@ public sealed class DomainAndIsolationTests
         Assert.Equal(1, page.PageSize);
     }
 
+    [Fact]
+    public async Task InvoiceListFiltersAndReturnsPagedTotals()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        await db.Database.EnsureCreatedAsync();
+        var client = new Client { CompanyName = "North Studio", Notes = "" };
+        db.Clients.Add(client);
+        db.Invoices.AddRange(
+            new Invoice
+            {
+                ClientId = client.Id, Number = "INV-002", Currency = "USD", Status = InvoiceStatus.Sent,
+                IssueDate = new DateOnly(2026, 2, 1), DueDate = new DateOnly(2026, 3, 1),
+                Lines = [new InvoiceLineItem { Description = "Design", Quantity = 2, UnitPrice = 125 }]
+            },
+            new Invoice
+            {
+                ClientId = client.Id, Number = "INV-001", Currency = "USD", Status = InvoiceStatus.Sent,
+                IssueDate = new DateOnly(2026, 1, 1), DueDate = new DateOnly(2026, 2, 1),
+                Lines = [new InvoiceLineItem { Description = "Review", Quantity = 1, UnitPrice = 75 }]
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new InvoicesController(db, new InvoicePdfService());
+        var result = Assert.IsType<OkObjectResult>(await controller.List(
+            "north", "Sent", null, 1, 1, "number", false, CancellationToken.None));
+        var page = Assert.IsType<PagedResult<object>>(result.Value);
+        Assert.Equal(2, page.Total);
+        Assert.Single(page.Items);
+        Assert.Equal(1, page.Page);
+        Assert.Equal(1, page.PageSize);
+    }
+
     private static AuthController CreateAuthController(ClientHubDbContext db)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

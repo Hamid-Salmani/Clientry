@@ -273,29 +273,45 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
     }
 
     [HttpGet("{projectId:guid}/activity")]
-    public async Task<IActionResult> Activity(Guid projectId, CancellationToken cancellationToken)
+    public async Task<IActionResult> Activity(Guid projectId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
         if (!await db.Projects.AnyAsync(x => x.Id == projectId, cancellationToken)) return NotFound();
-        var activity = await db.ActivityLogs.AsNoTracking().Where(x => x.ProjectId == projectId)
-            .OrderByDescending(x => x.CreatedAt)
-            .Select(item => new
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.ActivityLogs.AsNoTracking().Where(x => x.ProjectId == projectId);
+        var total = await query.CountAsync(cancellationToken);
+        var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
+        var activity = await query.OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Skip(skip).Take(pageSize).Select(item => new
             {
                 item.Id, item.Action, item.Metadata, item.CreatedAt,
                 actor = db.Users.Where(user => user.Id == item.ActorId).Select(user => user.FullName).FirstOrDefault() ?? "Team member"
             }).ToListAsync(cancellationToken);
-        return Ok(activity);
+        return Ok(new PagedResult<object>(activity.Cast<object>().ToArray(), total, page, pageSize));
     }
 
     [HttpGet("{projectId:guid}/comments")]
-    public async Task<IActionResult> Comments(Guid projectId, CancellationToken cancellationToken)
+    public async Task<IActionResult> Comments(Guid projectId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null, CancellationToken cancellationToken = default)
     {
         if (!await db.Projects.AnyAsync(x => x.Id == projectId, cancellationToken)) return NotFound();
-        var comments = await db.Comments.AsNoTracking().Where(x => x.ProjectId == projectId)
-            .OrderBy(x => x.CreatedAt).Select(x => new
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.Comments.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLowerInvariant();
+            query = query.Where(comment => comment.Body.ToLower().Contains(term));
+        }
+        var total = await query.CountAsync(cancellationToken);
+        var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
+        var comments = await query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Skip(skip).Take(pageSize).Select(x => new
             {
                 x.Id, x.Body, x.CreatedAt, author = x.Author == null ? "Team member" : x.Author.FullName
             }).ToListAsync(cancellationToken);
-        return Ok(comments);
+        return Ok(new PagedResult<object>(comments.Cast<object>().ToArray(), total, page, pageSize));
     }
 
     [HttpPost("{projectId:guid}/comments")]

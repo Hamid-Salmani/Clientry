@@ -80,16 +80,27 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
     }
 
     [HttpGet("clients/{clientId:guid}/invitations")]
-    public async Task<IActionResult> ListInvitations(Guid clientId, CancellationToken cancellationToken)
+    public async Task<IActionResult> ListInvitations(Guid clientId, [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20, [FromQuery] string? search = null,
+        CancellationToken cancellationToken = default)
     {
         if (!await db.Clients.AnyAsync(x => x.Id == clientId, cancellationToken)) return NotFound();
         var now = DateTime.UtcNow;
-        var invitations = await db.Invitations.AsNoTracking()
-            .Where(x => x.ClientId == clientId && !x.AcceptedAt.HasValue && !x.RevokedAt.HasValue && x.ExpiresAt > now)
-            .OrderBy(x => x.Email)
-            .Select(x => new { x.Id, x.Email, x.FullName, x.ExpiresAt })
-            .ToListAsync(cancellationToken);
-        return Ok(invitations);
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.Invitations.AsNoTracking()
+            .Where(x => x.ClientId == clientId && !x.AcceptedAt.HasValue && !x.RevokedAt.HasValue && x.ExpiresAt > now);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLowerInvariant();
+            query = query.Where(invitation => invitation.Email.ToLower().Contains(term) ||
+                invitation.FullName.ToLower().Contains(term));
+        }
+        var total = await query.CountAsync(cancellationToken);
+        var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
+        var invitations = await query.OrderBy(x => x.Email).Skip(skip).Take(pageSize)
+            .Select(x => new { x.Id, x.Email, x.FullName, x.ExpiresAt }).ToListAsync(cancellationToken);
+        return Ok(new PagedResult<object>(invitations.Cast<object>().ToArray(), total, page, pageSize));
     }
 
     [HttpPost("clients/{clientId:guid}/invitations/{invitationId:guid}/resend")]
@@ -262,32 +273,36 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
     [HttpGet("dashboard")]
     public async Task<IActionResult> Dashboard(CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var currentMonth = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var now = DateTime.UtcNow;
+        var today = DateOnly.FromDateTime(now);
+        var currentMonth = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
         var firstMonth = currentMonth.AddMonths(-5);
-        var invoices = await db.Invoices.AsNoTracking().Include(x => x.Lines).ToListAsync(cancellationToken);
-        var projects = await db.Projects.AsNoTracking().ToListAsync(cancellationToken);
-        var payments = await db.Payments.AsNoTracking().Where(x => x.PaidAt >= firstMonth)
-            .Select(x => new { x.PaidAt, x.Amount }).ToListAsync(cancellationToken);
+        var recentPayments = await db.Payments.AsNoTracking()
+            .Where(payment => payment.PaidAt.HasValue && payment.PaidAt.Value >= firstMonth)
+            .Select(payment => new { payment.PaidAt, payment.Amount }).ToListAsync(cancellationToken);
+        var revenue = recentPayments.Where(payment => payment.PaidAt.HasValue)
+            .GroupBy(payment => (payment.PaidAt!.Value.Year, payment.PaidAt.Value.Month))
+            .ToDictionary(group => group.Key, group => group.Sum(payment => payment.Amount));
         var revenueByMonth = Enumerable.Range(0, 6).Select(offset =>
         {
             var month = firstMonth.AddMonths(offset);
             return new
             {
                 month = month.ToString("MMM"),
-                revenue = payments.Where(x => x.PaidAt.HasValue &&
-                    x.PaidAt.Value.Year == month.Year && x.PaidAt.Value.Month == month.Month).Sum(x => x.Amount)
+                revenue = revenue.TryGetValue((month.Year, month.Month), out var amount) ? amount : 0m
             };
         }).ToArray();
+        var projectStatusGroups = await db.Projects.AsNoTracking().GroupBy(project => project.Status)
+            .Select(group => new { Status = group.Key, Count = group.Count() }).ToListAsync(cancellationToken);
         return Ok(new
         {
-            activeProjects = projects.Count(x => x.Status is ProjectStatus.InProgress or ProjectStatus.InReview),
+            activeProjects = await db.Projects.CountAsync(project =>
+                project.Status == ProjectStatus.InProgress || project.Status == ProjectStatus.InReview, cancellationToken),
             clientCount = await db.Clients.CountAsync(cancellationToken),
-            revenueThisMonth = payments.Where(x => x.PaidAt.HasValue &&
-                x.PaidAt.Value.Year == today.Year && x.PaidAt.Value.Month == today.Month).Sum(x => x.Amount),
-            unpaidInvoices = invoices.Count(x => x.Status == InvoiceStatus.Sent),
-            overdueInvoices = invoices.Count(x => x.Status == InvoiceStatus.Overdue),
-            projectStatus = projects.GroupBy(x => x.Status.ToString()).Select(x => new { status = x.Key, count = x.Count() }),
+            revenueThisMonth = revenue.TryGetValue((today.Year, today.Month), out var currentRevenue) ? currentRevenue : 0m,
+            unpaidInvoices = await db.Invoices.CountAsync(invoice => invoice.Status == InvoiceStatus.Sent, cancellationToken),
+            overdueInvoices = await db.Invoices.CountAsync(invoice => invoice.Status == InvoiceStatus.Overdue, cancellationToken),
+            projectStatus = projectStatusGroups.Select(group => new { status = group.Status.ToString(), count = group.Count }),
             revenueByMonth,
             recentActivity = await db.ActivityLogs.AsNoTracking().OrderByDescending(x => x.CreatedAt).Take(6)
                 .Select(x => new { x.Action, x.Metadata, x.CreatedAt }).ToListAsync(cancellationToken)

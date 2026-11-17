@@ -24,12 +24,24 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
     };
 
     [HttpGet]
-    public async Task<IActionResult> List(Guid projectId, CancellationToken cancellationToken)
+    public async Task<IActionResult> List(Guid projectId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null, CancellationToken cancellationToken = default)
     {
         if (!await db.Projects.AnyAsync(x => x.Id == projectId, cancellationToken)) return NotFound();
-        return Ok(await db.ProjectFiles.AsNoTracking().Where(x => x.ProjectId == projectId)
-            .OrderByDescending(x => x.UploadedAt)
-            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt }).ToListAsync(cancellationToken));
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.ProjectFiles.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLowerInvariant();
+            query = query.Where(file => file.FileName.ToLower().Contains(term));
+        }
+        var total = await query.CountAsync(cancellationToken);
+        var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
+        var items = await query.OrderByDescending(x => x.UploadedAt).ThenBy(x => x.Id)
+            .Skip(skip).Take(pageSize)
+            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt }).ToListAsync(cancellationToken);
+        return Ok(new PagedResult<object>(items.Cast<object>().ToArray(), total, page, pageSize));
     }
 
     [HttpPost]

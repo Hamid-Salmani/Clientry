@@ -1,4 +1,5 @@
 using ClientHub.Api.Services;
+using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
@@ -17,15 +18,53 @@ namespace ClientHub.Api.Controllers;
 public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService pdf) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> List(CancellationToken cancellationToken)
+    public async Task<IActionResult> List(
+        [FromQuery] string? search,
+        [FromQuery] string? status,
+        [FromQuery] Guid? clientId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? sortBy = "issueDate",
+        [FromQuery] bool descending = true,
+        CancellationToken cancellationToken = default)
     {
-        var invoices = await db.Invoices.AsNoTracking().Include(x => x.Lines)
-            .OrderByDescending(x => x.IssueDate).ToListAsync(cancellationToken);
-        return Ok(invoices.Select(x => new
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.Invoices.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(search))
         {
-            x.Id, x.Number, x.IssueDate, x.DueDate, status = x.Status.ToString(),
-            x.Currency, total = x.Total
-        }));
+            var term = search.Trim().ToLowerInvariant();
+            query = query.Where(invoice => invoice.Number.ToLower().Contains(term) ||
+                invoice.Client!.CompanyName.ToLower().Contains(term));
+        }
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (!Enum.TryParse<InvoiceStatus>(status, true, out var invoiceStatus) || !Enum.IsDefined(invoiceStatus))
+                return BadRequest(new { message = "Unknown invoice status." });
+            query = query.Where(invoice => invoice.Status == invoiceStatus);
+        }
+        if (clientId.HasValue && User.IsInRole("Admin"))
+            query = query.Where(invoice => invoice.ClientId == clientId.Value);
+
+        var total = await query.CountAsync(cancellationToken);
+        var ordered = (sortBy?.ToLowerInvariant(), descending) switch
+        {
+            ("number", false) => query.OrderBy(invoice => invoice.Number),
+            ("number", true) => query.OrderByDescending(invoice => invoice.Number),
+            ("duedate", false) => query.OrderBy(invoice => invoice.DueDate),
+            ("duedate", true) => query.OrderByDescending(invoice => invoice.DueDate),
+            (_, false) => query.OrderBy(invoice => invoice.IssueDate),
+            _ => query.OrderByDescending(invoice => invoice.IssueDate)
+        };
+        var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
+        var invoices = await ordered.Skip(skip).Take(pageSize).Include(invoice => invoice.Lines)
+            .ToListAsync(cancellationToken);
+        var items = invoices.Select(invoice => new
+        {
+            invoice.Id, invoice.Number, invoice.IssueDate, invoice.DueDate, status = invoice.Status.ToString(),
+            invoice.Currency, total = invoice.Total
+        }).ToArray();
+        return Ok(new PagedResult<object>(items.Cast<object>().ToArray(), total, page, pageSize));
     }
 
     [HttpGet("{invoiceId:guid}/pdf")]

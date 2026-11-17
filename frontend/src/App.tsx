@@ -159,10 +159,10 @@ function App() {
     try {
       const [projectData, invoiceData] = await Promise.all([
         request<{ items: Project[] }>('/projects?page=1&pageSize=100', authToken),
-        request<Invoice[]>('/invoices', authToken),
+        request<{ items: Invoice[] }>('/invoices?page=1&pageSize=100', authToken),
       ])
       setProjects(projectData.items)
-      setInvoices(invoiceData)
+      setInvoices(invoiceData.items)
       if (currentUser.role === 'Admin') {
         const [dashboard, clientData, settings] = await Promise.all([
           request<Metrics>('/admin/dashboard', authToken),
@@ -205,11 +205,11 @@ function App() {
 
   useEffect(() => {
     if (!selectedProject || !token) return
-    request<Comment[]>(`/projects/${selectedProject.id}/comments`, token)
-      .then(setComments)
+    request<{ items: Comment[] }>(`/projects/${selectedProject.id}/comments?page=1&pageSize=100`, token)
+      .then((result) => setComments(result.items))
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load comments.'))
-    request<ProjectFile[]>(`/projects/${selectedProject.id}/files`, token)
-      .then(setProjectFiles)
+    request<{ items: ProjectFile[] }>(`/projects/${selectedProject.id}/files?page=1&pageSize=100`, token)
+      .then((result) => setProjectFiles(result.items))
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load files.'))
   }, [selectedProject, token])
 

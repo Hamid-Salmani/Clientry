@@ -13,6 +13,7 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - Invoice administration supports draft creation/editing/deletion, valid status transitions, verified-payment-only completion, PDF downloads, and CSV export.
 - User-scoped notifications provide paged retrieval, read/unread controls, and account-persisted workspace-update and invoice-reminder preferences; project and invoice changes generate notifications according to those preferences.
 - Administrators can persist the workspace display name and support email; client settings remain personal to their account.
+- The dashboard uses database-side counts and a six-month payment window; project, invoice, file, comment, activity, invitation, client, and notification collections support bounded pagination, with search or sorting where applicable.
 - React + TypeScript frontend for client and admin workspaces, project detail, conversations, files, invoices, and basic admin overview/client list.
 - Dockerfiles, Compose services, Mailpit, and GitHub Actions build/test workflow.
 
@@ -82,8 +83,8 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 
 - **Exists:** The backend is split into domain, application, infrastructure, and API projects; EF Core migrations manage SQLite; JWT roles and login lockout protect API routes; client-owned projects, milestones, files, comments, invoices, invoice lines, payments, notifications, and activity are filtered; SignalR checks project access before group membership; Stripe webhooks validate signatures, amount, and currency.
 - **Weak, corrected:** Client requests previously had no global filters for users, clients, or invitations, and a client scope missing its `client_id` could match nullable ownership. Filters now cover those entities and fail closed when the claim is absent; the isolation test covers both client separation and missing claims.
-- **Weak:** Uploads are limited to PDF, PNG, JPEG, and TXT. Image/PDF signatures are checked, but TXT previously accepted arbitrary binary data. SignalR relies on the global project filter without an explicit client-claim check in the hub, and dashboard data loading and several list endpoints still need server-side pagination.
-- **Missing:** Invoice numbering beyond generated unique identifiers, pagination/search on all list endpoints, and the production-grade frontend flows described in the feature requirements.
+- **Weak:** Uploads are limited to PDF, PNG, JPEG, and TXT. Image/PDF signatures are checked, but TXT previously accepted arbitrary binary data. SignalR relies on the global project filter without an explicit client-claim check in the hub.
+- **Missing:** Invoice numbering beyond generated unique identifiers and some production-grade frontend flows described in the feature requirements.
 
 ## Design decisions and assumptions
 
@@ -96,4 +97,4 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 
 ## Current limitations
 
-This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and scheduled reminders, invoice numbers beyond generated unique identifiers, pagination/search on all list endpoints, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.
+This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and scheduled reminders, invoice numbers beyond generated unique identifiers, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.
