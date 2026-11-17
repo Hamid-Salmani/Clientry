@@ -42,6 +42,17 @@ public sealed class DomainAndIsolationTests
     public void InvoiceTransitionsFollowBusinessRules(InvoiceStatus current, InvoiceStatus next, bool expected) =>
         Assert.Equal(expected, InvoiceRules.CanTransition(current, next));
 
+    [Theory]
+    [InlineData(ProjectStatus.Pending, ProjectStatus.InProgress, true)]
+    [InlineData(ProjectStatus.InProgress, ProjectStatus.Pending, true)]
+    [InlineData(ProjectStatus.InProgress, ProjectStatus.Delivered, false)]
+    [InlineData(ProjectStatus.InReview, ProjectStatus.Delivered, true)]
+    [InlineData(ProjectStatus.Delivered, ProjectStatus.InReview, true)]
+    [InlineData(ProjectStatus.Archived, ProjectStatus.Delivered, true)]
+    [InlineData(ProjectStatus.Archived, ProjectStatus.InProgress, false)]
+    public void ProjectTransitionsFollowAllowedForwardAndBackSteps(ProjectStatus current, ProjectStatus next, bool expected) =>
+        Assert.Equal(expected, ProjectRules.CanTransition(current, next));
+
     [Fact]
     public async Task ClientQueryFiltersHideAnotherClientsResources()
     {

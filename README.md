@@ -8,6 +8,7 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - SQLite persistence with EF Core migrations and demo seed data, JWT authentication, role checks, login throttling/lockout, tenant query filters, and resource-scoped file, invoice, project, and comment endpoints.
 - Project milestones and progress, comments with SignalR project groups, restricted local file uploads/downloads, generated invoice PDFs, and Stripe PaymentIntent/webhook handling.
 - Administrator client lifecycle management: search/paged client list, create/update, activation, client details, user status controls, and per-client invitations.
+- Project administration: searchable, filterable, sortable paged project lists; project edits and status/archive transitions; milestone CRUD, completion, ordering, and per-project activity history.
 - React + TypeScript frontend for client and admin workspaces, project detail, conversations, files, invoices, and basic admin overview/client list.
 - Dockerfiles, Compose services, Mailpit, and GitHub Actions build/test workflow.
 
@@ -77,8 +78,8 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 
 - **Exists:** The backend is split into domain, application, infrastructure, and API projects; EF Core migrations manage SQLite; JWT roles and login lockout protect API routes; client-owned projects, milestones, files, comments, invoices, invoice lines, payments, notifications, and activity are filtered; SignalR checks project access before group membership; Stripe webhooks validate signatures, amount, and currency.
 - **Weak, corrected:** Client requests previously had no global filters for users, clients, or invitations, and a client scope missing its `client_id` could match nullable ownership. Filters now cover those entities and fail closed when the claim is absent; the isolation test covers both client separation and missing claims.
-- **Weak:** Uploads are limited to PDF, PNG, JPEG, and TXT. Image/PDF signatures are checked, but TXT previously accepted arbitrary binary data. SignalR relies on the global project filter without an explicit client-claim check in the hub, the dashboard loads invoice/project rows into memory, and the login access token lasts two hours.
-- **Missing:** Complete admin CRUD, project/milestone management, notifications API and server-side preferences, workspace settings, invoice editing/numbering/export, pagination/search, and the production-grade frontend flows described in the feature requirements.
+- **Weak:** Uploads are limited to PDF, PNG, JPEG, and TXT. Image/PDF signatures are checked, but TXT previously accepted arbitrary binary data. SignalR relies on the global project filter without an explicit client-claim check in the hub, and dashboard data loading and several list endpoints still need server-side pagination.
+- **Missing:** Notifications API and server-side preferences, workspace settings, invoice editing/numbering/export, pagination/search on all list endpoints, and the production-grade frontend flows described in the feature requirements.
 
 ## Design decisions and assumptions
 
@@ -91,4 +92,4 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 
 ## Current limitations
 
-This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and reminders, project/milestone management, full invoice workflows, CSV export, pagination/search on all list endpoints, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.
+This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and reminders, full invoice workflows, CSV export, pagination/search on all list endpoints, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.

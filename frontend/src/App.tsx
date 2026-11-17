@@ -149,10 +149,10 @@ function App() {
     setError('')
     try {
       const [projectData, invoiceData] = await Promise.all([
-        request<Project[]>('/projects', authToken),
+        request<{ items: Project[] }>('/projects?page=1&pageSize=100', authToken),
         request<Invoice[]>('/invoices', authToken),
       ])
-      setProjects(projectData)
+      setProjects(projectData.items)
       setInvoices(invoiceData)
       if (currentUser.role === 'Admin') {
         const [dashboard, clientData] = await Promise.all([

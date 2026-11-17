@@ -183,3 +183,18 @@ public static class InvoiceRules
             _ => current == next
         };
 }
+
+public static class ProjectRules
+{
+    public static bool CanTransition(ProjectStatus current, ProjectStatus next) =>
+        current == next ||
+        (current, next) switch
+        {
+            (ProjectStatus.Pending, ProjectStatus.InProgress or ProjectStatus.Archived) => true,
+            (ProjectStatus.InProgress, ProjectStatus.Pending or ProjectStatus.InReview or ProjectStatus.Archived) => true,
+            (ProjectStatus.InReview, ProjectStatus.InProgress or ProjectStatus.Delivered or ProjectStatus.Archived) => true,
+            (ProjectStatus.Delivered, ProjectStatus.InReview or ProjectStatus.Archived) => true,
+            (ProjectStatus.Archived, ProjectStatus.Delivered) => true,
+            _ => false
+        };
+}
