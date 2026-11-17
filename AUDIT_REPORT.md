@@ -49,11 +49,11 @@ Statuses are **PASS**, **FIXED**, or **NOT YET VERIFIED**. Items marked partial 
 
 | Area / item | Status | Evidence |
 |---|---|---|
-| Auth — self-registration disabled by default | NOT YET VERIFIED | Requires direct anonymous registration HTTP check and configuration verification. |
+| Auth — self-registration disabled by default | PASS | Fresh seeded API returned HTTP 404 from anonymous `POST /api/auth/register` with the default registration setting disabled. |
 | Auth — admin invite, Mailpit email, browser acceptance, reuse/expiry rejection | PASS | `client-journey.spec.ts` creates an invite, reads its Mailpit link, accepts in Chromium, rejects a second use. `InvitationAcceptanceCreatesClientUserOnceAndRejectsExpiredInvitations` covers expired/used invitation rejection in the 45-test suite. |
 | Auth — login | PASS | Fresh seeded admin/client logins succeeded; Playwright signs in both roles. |
-| Auth — refresh rotation, old-token reuse rejection, logout revocation | NOT YET VERIFIED | — |
-| Auth — forgot/reset, lockout, auth throttling | NOT YET VERIFIED | — |
+| Auth — refresh rotation, old-token reuse rejection, logout revocation | PASS | HTTP checks: login 200, rotation 200 with a distinct refresh token, old-token reuse 401 and replacement revoked (401); logout 204 and its refresh token rejected (401). `RefreshTokenRotationDetectsReuseAndRevokesTheActiveReplacement` also passes in the backend suite. |
+| Auth — forgot/reset, change password, lockout, auth throttling | PASS, WITH RESET-EXPIRY CAVEAT | Mailpit delivered the reset link; reset 204, new password login 200, old password 401, consumed reset link 400. Change-password 200; prior refresh token 401; new password login 200, old password 401. Five wrong logins returned 401; correct password remained 401 during lockout; ninth request returned 429. An expired password-reset token was not separately exercised. |
 | Admin — client create/edit/deactivate and deactivated login/data retention | PARTIAL | The browser journey creates a client by the admin API; edit/deactivation behavior remains unverified. |
 | Admin — project create/edit/archive/status transitions | PARTIAL | Journey creates a project; other transitions remain unverified. |
 | Admin — milestone CRUD/reorder/complete/progress | PARTIAL | Journey creates three milestones and verifies approval completes one; edit/delete/reorder and progress reconciliation remain unverified. |
@@ -209,7 +209,7 @@ The sweep does not yet cover every page's loading/empty/error states, all forms'
 |---|---|
 | `dotnet build backend/ClientHub.slnx -warnaserror` | PASS, 0 warnings / 0 errors |
 | `dotnet test backend/ClientHub.slnx` | PASS, 45 passed / 0 failed |
-| `dotnet test backend/ClientHub.slnx --no-build --filter FullyQualifiedName~RouteAuthorizationTests` | PASS, 3 passed |
+| `dotnet test backend/ClientHub.slnx --filter FullyQualifiedName~RouteAuthorizationTests` | PASS, 5 passed |
 | `dotnet test backend/ClientHub.slnx --no-build --filter FullyQualifiedName~FileUploadsRejectBinaryText` | PASS, 1 passed |
 | `npm ci` | PASS, 120 packages installed |
 | `npm run build` | PASS |
@@ -219,6 +219,7 @@ The sweep does not yet cover every page's loading/empty/error states, all forms'
 | `dotnet list backend/ClientHub.slnx package --vulnerable --include-transitive` | PASS, none reported |
 | `npm run test:e2e -- --workers=1` | PASS, 3 browser tests |
 | Fresh local HTTP batch: invalid Stripe signature and signed `payment_intent.payment_failed` | PASS, 400 / 200; invoice remained unpaid |
+| Fresh local HTTP auth batches | PASS: register 404; rotation/reuse/logout 200/401/204/401; reset and reuse 204/400; lockout 401 and throttling 429; change-password 200 and old refresh revoked 401 |
 | Docker Compose | NOT AVAILABLE, Docker CLI missing |
 
 ## Not verified / known limitations
@@ -227,4 +228,4 @@ The sweep does not yet cover every page's loading/empty/error states, all forms'
 - Stripe currency-mismatch rejection is not yet verified.
 - SMTP is verified through Mailpit, not an external provider.
 - Docker Compose could not run because Docker is not installed; the API/client/Mailpit stack was started locally.
-- All Phase 2 items explicitly labeled NOT YET VERIFIED above, the complete route-by-route isolation matrix, SignalR group-join isolation, and all other security properties explicitly labeled not verified above must not be interpreted as passing.
+- Expired password-reset token behavior is not separately verified; the used-token failure was observed as HTTP 400. All non-auth Phase 2 items labeled NOT YET VERIFIED, remaining security controls in Phase 3, and the complete UI sweep must not be interpreted as passing.
