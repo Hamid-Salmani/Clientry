@@ -3,6 +3,7 @@ namespace ClientHub.Domain;
 public enum UserRole { Admin, Client }
 public enum ProjectStatus { Pending, InProgress, InReview, Delivered, Archived }
 public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Void }
+public enum MilestoneApprovalStatus { NotRequired, Pending, Approved, ChangesRequested }
 
 public sealed class User
 {
@@ -54,6 +55,11 @@ public sealed class Milestone
     public DateOnly? DueDate { get; set; }
     public bool IsCompleted { get; set; }
     public int Order { get; set; }
+    public MilestoneApprovalStatus ApprovalStatus { get; set; }
+    public DateTime? RequestedAt { get; set; }
+    public Guid? DecidedById { get; set; }
+    public DateTime? DecidedAt { get; set; }
+    public string? DecisionNote { get; set; }
     public Project? Project { get; set; }
 }
 
@@ -214,4 +220,13 @@ public static class ProjectRules
             (ProjectStatus.Archived, ProjectStatus.Delivered) => true,
             _ => false
         };
+}
+
+public static class MilestoneApprovalRules
+{
+    public static bool CanRequest(MilestoneApprovalStatus status, bool isCompleted) =>
+        !isCompleted && status != MilestoneApprovalStatus.Pending;
+
+    public static bool CanDecide(MilestoneApprovalStatus status) =>
+        status == MilestoneApprovalStatus.Pending;
 }

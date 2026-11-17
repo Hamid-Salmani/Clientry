@@ -78,9 +78,27 @@ public static class DemoData
             };
             db.AddRange(seedClientA, seedClientB, admin, userA, userB, projectA, projectB, invoiceA, invoiceB,
                 new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Discovery & strategy", Order = 1, IsCompleted = true },
-                new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Visual directions", Order = 2, IsCompleted = true },
-                new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Identity system", Order = 3 },
-                new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Brand guidelines", Order = 4 },
+                new Milestone
+                {
+                    ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Visual directions", Order = 2,
+                    IsCompleted = true, ApprovalStatus = MilestoneApprovalStatus.Approved,
+                    RequestedAt = new DateTime(2026, 10, 20, 10, 0, 0, DateTimeKind.Utc),
+                    DecidedById = userA.Id, DecidedAt = new DateTime(2026, 10, 21, 10, 0, 0, DateTimeKind.Utc)
+                },
+                new Milestone
+                {
+                    ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Identity system", Order = 3,
+                    ApprovalStatus = MilestoneApprovalStatus.Pending,
+                    RequestedAt = new DateTime(2026, 11, 16, 10, 0, 0, DateTimeKind.Utc)
+                },
+                new Milestone
+                {
+                    ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Brand guidelines", Order = 4,
+                    ApprovalStatus = MilestoneApprovalStatus.ChangesRequested,
+                    RequestedAt = new DateTime(2026, 10, 28, 10, 0, 0, DateTimeKind.Utc),
+                    DecidedById = userA.Id, DecidedAt = new DateTime(2026, 10, 29, 10, 0, 0, DateTimeKind.Utc),
+                    DecisionNote = "Please include the accessible color contrast variations."
+                },
                 new Milestone { ClientId = seedClientB.Id, ProjectId = projectB.Id, Title = "Operations review", Order = 1, IsCompleted = true },
                 new Milestone { ClientId = seedClientB.Id, ProjectId = projectB.Id, Title = "Recommendations", Order = 2, IsCompleted = true },
                 new Comment { ClientId = seedClientA.Id, ProjectId = projectA.Id, AuthorId = admin.Id, Body = "The first visual directions are ready for your review." },

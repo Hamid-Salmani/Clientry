@@ -17,7 +17,14 @@ type Project = {
   startDate: string
   dueDate?: string
   progress: number
-  milestones: { id: string; title: string; isCompleted: boolean; dueDate?: string }[]
+  milestones: {
+    id: string; title: string; isCompleted: boolean; dueDate?: string
+    approvalStatus?: string; requestedAt?: string; decisionNote?: string
+  }[]
+}
+type ApprovalItem = {
+  id: string; projectId: string; clientId: string; projectName: string; title: string
+  dueDate?: string; requestedAt?: string; approvalStatus: 'Pending'
 }
 type Invoice = {
   id: string; clientId: string; number: string; issueDate: string; dueDate: string
@@ -73,6 +80,7 @@ function Icon({ name }: { name: string }) {
     layers: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5',
     file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8',
     users: 'M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m6-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm6-7.9a4 4 0 0 1 0 7.8M20 21v-2a4 4 0 0 0-3-3.87',
+    check: 'm5 12 4 4L19 6',
     settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-5v2m0 14v2m9-9h-2M5 12H3m15.36-6.36-1.42 1.42M7.06 16.94l-1.42 1.42m12.72 0-1.42-1.42M7.06 7.06 5.64 5.64',
     search: 'm20 20-4.5-4.5M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z',
     bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0',
@@ -129,6 +137,7 @@ function App() {
   const location = useLocation()
   const projectRouteId = location.pathname.match(/^\/projects\/([0-9a-f-]+)$/i)?.[1]
   const activePage = location.pathname.startsWith('/clients') ? 'Clients'
+    : location.pathname.startsWith('/approvals') ? 'Approvals'
     : location.pathname.startsWith('/projects') ? 'Projects'
       : location.pathname.startsWith('/invoices') ? 'Invoices'
         : location.pathname.startsWith('/settings') ? 'Settings'
@@ -208,6 +217,11 @@ function App() {
     queryKey: ['notification-preferences', token],
     queryFn: () => request<NotificationPreferences>('/notifications/preferences', token),
     enabled: Boolean(token),
+  })
+  const approvalsQuery = useQuery({
+    queryKey: ['approvals', token],
+    queryFn: () => request<{ items: ApprovalItem[]; total: number }>('/approvals?page=1&pageSize=100', token),
+    enabled: Boolean(token && user?.role === 'Client'),
   })
   const projectContentQuery = useQuery({
     queryKey: ['project-content', token, selectedProject?.id],
@@ -401,6 +415,16 @@ function App() {
     }
   }
 
+  async function refreshProject(projectId: string): Promise<void> {
+    try {
+      const updated = await request<Project>(`/projects/${projectId}`, token)
+      setSelectedProject(updated)
+      void queryClient.invalidateQueries({ queryKey: ['workspace', token] })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to refresh this project.')
+    }
+  }
+
   async function uploadFile(file: File) {
     if (!selectedProject) return
     try {
@@ -463,10 +487,11 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          {(admin ? ['Overview', 'Projects', 'Invoices', 'Clients'] : ['Overview', 'Projects', 'Invoices']).map((item) => (
+          {(admin ? ['Overview', 'Projects', 'Invoices', 'Clients'] : ['Overview', 'Projects', 'Approvals', 'Invoices']).map((item) => (
             <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} aria-current={activePage === item ? 'page' : undefined} onClick={() => navigateTo(item)}>
-              <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Invoices' ? 'file' : 'users'} />{item}
+              <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Approvals' ? 'check' : item === 'Invoices' ? 'file' : 'users'} />{item}
               {item === 'Invoices' && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <span className="nav-count">{invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').length}</span>}
+              {item === 'Approvals' && (approvalsQuery.data?.total ?? 0) > 0 && <span className="nav-count">{approvalsQuery.data?.total}</span>}
             </button>
           ))}
         </nav>
@@ -502,11 +527,13 @@ function App() {
           {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
           {loading && <div className="loading-bar" role="status" aria-label="Loading workspace" />}
           {selectedProject ? (
-            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => navigateTo('Projects')} />
+            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onProjectChanged={() => refreshProject(selectedProject.id)} onBack={() => navigateTo('Projects')} />
           ) : activePage === 'Overview' ? (
             <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} supportEmail={supportEmail} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
           ) : activePage === 'Projects' ? (
-            <Projects projects={projects} onOpenProject={openProject} />
+            <Projects projects={projects} admin={Boolean(admin)} onOpenProject={openProject} />
+          ) : activePage === 'Approvals' ? (
+            <Approvals items={approvalsQuery.data?.items ?? []} loading={approvalsQuery.isLoading} error={approvalsQuery.error instanceof Error ? approvalsQuery.error.message : ''} token={token} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['approvals', token] })} />
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} admin={Boolean(admin)} clients={clients} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           ) : activePage === 'Settings' ? (
@@ -690,8 +717,70 @@ function ProjectRow({ project, onClick }: { project: Project; onClick: () => voi
   return <button className="project-row" onClick={onClick}><div className="project-icon"><Icon name="layers" /></div><div className="project-info"><strong>{project.name}</strong><span>{project.description}</span></div><div className="project-progress"><div className="progress-caption"><span>{project.progress}% complete</span><b>{project.dueDate ? new Date(project.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' }) : 'No due date'}</b></div><div className="progress-track"><i style={{ width: `${project.progress}%` }} /></div></div><span className={`status-pill status-${project.status.toLowerCase()}`}>{project.status.replace(/([A-Z])/g, ' $1').trim()}</span><Icon name="arrow" /></button>
 }
 
-function Projects({ projects, onOpenProject }: { projects: Project[]; onOpenProject: (project: Project) => void }) {
-  return <div className="page-enter"><div className="page-heading"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>Projects<span className="heading-period">.</span></h1><p>All the moving pieces, in one clear view.</p></div></div><section className="panel full-panel">{projects.length ? projects.map((project) => <ProjectRow key={project.id} project={project} onClick={() => onOpenProject(project)} />) : <EmptyState title="No projects yet" text="Your team will add a project here when work begins." />}</section></div>
+function Projects({ projects, admin, onOpenProject }: { projects: Project[]; admin: boolean; onOpenProject: (project: Project) => void }) {
+  const [waitingOnClient, setWaitingOnClient] = useState(false)
+  const visibleProjects = waitingOnClient
+    ? projects.filter((project) => project.milestones.some((milestone) => milestone.approvalStatus === 'Pending'))
+    : projects
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>Projects<span className="heading-period">.</span></h1><p>All the moving pieces, in one clear view.</p></div>
+      {admin && <label className="approval-filter"><input type="checkbox" checked={waitingOnClient} onChange={(event) => setWaitingOnClient(event.target.checked)} /> Waiting on client</label>}
+    </div>
+    <section className="panel full-panel">{visibleProjects.length ? visibleProjects.map((project) => <ProjectRow key={project.id} project={project} onClick={() => onOpenProject(project)} />) : <EmptyState title={waitingOnClient ? 'No approvals waiting' : 'No projects yet'} text={waitingOnClient ? 'Milestones awaiting a client decision will appear here.' : 'Your team will add a project here when work begins.'} />}</section>
+  </div>
+}
+
+function Approvals({ items, loading, error, token, onChanged }: {
+  items: ApprovalItem[]; loading: boolean; error: string; token: string; onChanged: () => void
+}) {
+  const [dialog, setDialog] = useState<{ item: ApprovalItem; decision: 'Approved' | 'ChangesRequested' } | null>(null)
+  const [note, setNote] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submitDecision(event: FormEvent) {
+    event.preventDefault()
+    if (!dialog || (dialog.decision === 'ChangesRequested' && !note.trim())) return
+    setBusy(true); setActionError('')
+    try {
+      await request(`/projects/${dialog.item.projectId}/milestones/${dialog.item.id}/approval-decision`, token, {
+        method: 'POST', body: JSON.stringify({ decision: dialog.decision, note: note.trim() || null }),
+      })
+      setDialog(null); setNote(''); onChanged()
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Unable to save your decision.')
+    } finally { setBusy(false) }
+  }
+
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">CLIENT REVIEW</div><h1>Approvals<span className="heading-period">.</span></h1><p>Review work your agency has shared with you.</p></div></div>
+    {(error || actionError) && <div className="alert" role="alert">{actionError || error}{actionError && <button onClick={() => setActionError('')} aria-label="Dismiss error">×</button>}</div>}
+    <section className="panel full-panel approval-list">
+      {loading ? <div className="approval-skeletons" role="status" aria-label="Loading approvals"><i /><i /><i /></div> :
+        items.length ? items.map((item) => <article className="approval-item" key={item.id}>
+          <div className="approval-item-copy"><span className="status-pill status-pending">Waiting for your review</span><h2>{item.title}</h2><p>{item.projectName}</p>
+            <small>Requested {item.requestedAt ? relativeDate(item.requestedAt) : 'recently'}{item.dueDate ? ` · Due ${new Date(item.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}` : ''}</small>
+          </div>
+          <div className="approval-actions">
+            <button className="primary-button" onClick={() => { setDialog({ item, decision: 'Approved' }); setActionError('') }}>Approve</button>
+            <button className="cancel-button" onClick={() => { setDialog({ item, decision: 'ChangesRequested' }); setNote(''); setActionError('') }}>Request changes</button>
+          </div>
+        </article>) : <EmptyState title="You’re all caught up" text="Milestones awaiting your review will appear here." />}
+    </section>
+    {dialog && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setDialog(null) }}>
+      <section className="payment-modal project-modal approval-dialog" role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title">
+        <button className="modal-close" onClick={() => setDialog(null)} aria-label="Close approval decision">×</button>
+        <div className="eyebrow">MILESTONE REVIEW</div><h2 id="approval-dialog-title">{dialog.decision === 'Approved' ? 'Approve this milestone?' : 'Request changes'}</h2>
+        <p className="payment-description">{dialog.item.title} · {dialog.item.projectName}</p>
+        {dialog.decision === 'Approved' && <p className="approval-confirmation">Approving marks this milestone as complete.</p>}
+        <form className="create-project-form" onSubmit={(event) => void submitDecision(event)}>
+          {dialog.decision === 'ChangesRequested' && <label>What should be changed?<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} required /></label>}
+          {actionError && <p className="payment-error" role="alert">{actionError}</p>}
+          <div className="modal-actions"><button type="button" className="cancel-button" onClick={() => setDialog(null)} disabled={busy}>Cancel</button><button className="primary-button" disabled={busy || (dialog.decision === 'ChangesRequested' && !note.trim())}>{busy ? 'Saving…' : dialog.decision === 'Approved' ? 'Confirm approval' : 'Send request'}</button></div>
+        </form>
+      </section>
+    </div>}
+  </div>
 }
 
 function Invoices({ invoices, token, admin, clients, onChanged }: {
@@ -1041,11 +1130,12 @@ function ProjectCreateModal({ clients, token, onClose, onCreated }: {
   </div>
 }
 
-function ProjectDetail({ project, comments, setComments, files, setFiles, token, currentUserId, isAdmin, commentText, setCommentText, onSubmit, onUpload, onDownload, onBack }: {
+function ProjectDetail({ project, comments, setComments, files, setFiles, token, currentUserId, isAdmin, commentText, setCommentText, onSubmit, onUpload, onDownload, onProjectChanged, onBack }: {
   project: Project; comments: Comment[]; setComments: React.Dispatch<React.SetStateAction<Comment[]>>
   files: ProjectFile[]; setFiles: React.Dispatch<React.SetStateAction<ProjectFile[]>>
   token: string; currentUserId: string; isAdmin: boolean; commentText: string; setCommentText: (value: string) => void
-  onSubmit: (event: FormEvent) => void; onUpload: (file: File) => void; onDownload: (file: ProjectFile) => void; onBack: () => void
+  onSubmit: (event: FormEvent) => void; onUpload: (file: File) => void; onDownload: (file: ProjectFile) => void
+  onProjectChanged: () => Promise<void>; onBack: () => void
 }) {
   const [realtimeError, setRealtimeError] = useState('')
   const [actionError, setActionError] = useState('')
@@ -1054,6 +1144,16 @@ function ProjectDetail({ project, comments, setComments, files, setFiles, token,
   const [editingFile, setEditingFile] = useState<string | null>(null)
   const [fileNameDraft, setFileNameDraft] = useState('')
   const [busyAction, setBusyAction] = useState(false)
+
+  async function requestApproval(milestoneId: string) {
+    setBusyAction(true); setActionError('')
+    try {
+      await request(`/projects/${project.id}/milestones/${milestoneId}/approval-request`, token, { method: 'POST' })
+      await onProjectChanged()
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Unable to request approval.')
+    } finally { setBusyAction(false) }
+  }
 
   async function saveComment(event: FormEvent, comment: Comment) {
     event.preventDefault()
@@ -1152,7 +1252,17 @@ function ProjectDetail({ project, comments, setComments, files, setFiles, token,
         <section className="panel detail-main">
           <div className="panel-heading"><div><h2>Milestones</h2><p>Your progress, step by step.</p></div><span className="completion-label">{project.progress}% complete</span></div>
           <div className="detail-progress"><i style={{ width: `${project.progress}%` }} /></div>
-          <div className="milestone-list">{project.milestones.map((milestone, index) => <div className="milestone" key={milestone.id}><div className={`milestone-check ${milestone.isCompleted ? 'done' : ''}`}>{milestone.isCompleted ? '✓' : String(index + 1).padStart(2, '0')}</div><div className="milestone-copy"><strong>{milestone.title}</strong><span>{milestone.isCompleted ? 'Completed' : milestone.dueDate ? `Due ${new Date(milestone.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}` : 'Up next'}</span></div>{milestone.isCompleted && <span className="done-tag">DONE</span>}</div>)}</div>
+          <div className="milestone-list">{project.milestones.map((milestone, index) => {
+            const approvalStatus = milestone.approvalStatus ?? 'NotRequired'
+            return <div className="milestone" key={milestone.id}>
+              <div className={`milestone-check ${milestone.isCompleted ? 'done' : ''}`}>{milestone.isCompleted ? '✓' : String(index + 1).padStart(2, '0')}</div>
+              <div className="milestone-copy"><strong>{milestone.title}</strong><span>{milestone.isCompleted ? 'Completed' : milestone.dueDate ? `Due ${new Date(milestone.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}` : 'Up next'}</span>
+                {approvalStatus !== 'NotRequired' && <span className={`approval-status approval-${approvalStatus.toLowerCase()}`}>{approvalStatus === 'Pending' ? 'Waiting on client' : approvalStatus === 'ChangesRequested' ? `Changes requested${milestone.decisionNote ? `: ${milestone.decisionNote}` : ''}` : 'Approved'}</span>}
+              </div>
+              {milestone.isCompleted && <span className="done-tag">DONE</span>}
+              {isAdmin && !milestone.isCompleted && approvalStatus !== 'Pending' && <button className="download-button" onClick={() => void requestApproval(milestone.id)} disabled={busyAction}>Request approval</button>}
+            </div>
+          })}</div>
           <div className="project-dates"><span>Started <b>{new Date(project.startDate).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</b></span><span>Due <b>{project.dueDate ? new Date(project.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Not set'}</b></span></div>
         </section>
         <section className="panel files-panel">

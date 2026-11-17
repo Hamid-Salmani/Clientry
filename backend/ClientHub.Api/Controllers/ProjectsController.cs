@@ -20,6 +20,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         [FromQuery] string? search,
         [FromQuery] string? status,
         [FromQuery] Guid? clientId,
+        [FromQuery] bool waitingOnClient = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] string? sortBy = "startDate",
@@ -44,6 +45,9 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         }
         if (clientId.HasValue && User.IsInRole("Admin"))
             query = query.Where(project => project.ClientId == clientId.Value);
+        if (waitingOnClient)
+            query = query.Where(project => project.Milestones.Any(milestone =>
+                milestone.ApprovalStatus == MilestoneApprovalStatus.Pending));
 
         var total = await query.CountAsync(cancellationToken);
         var ordered = (sortBy?.ToLowerInvariant(), descending) switch
@@ -72,7 +76,9 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
                 (int)Math.Round(project.Milestones.Count(milestone => milestone.IsCompleted) * 100d / project.Milestones.Count),
             milestones = project.Milestones.OrderBy(milestone => milestone.Order).Select(milestone => new
             {
-                milestone.Id, milestone.Title, milestone.DueDate, milestone.IsCompleted, milestone.Order
+                milestone.Id, milestone.Title, milestone.DueDate, milestone.IsCompleted, milestone.Order,
+                approvalStatus = milestone.ApprovalStatus.ToString(), milestone.RequestedAt,
+                milestone.DecidedAt, milestone.DecisionNote
             })
         }).ToListAsync(cancellationToken);
         return Ok(new PagedResult<object>(projects.Cast<object>().ToArray(), total, page, pageSize));
@@ -120,7 +126,9 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
                     (int)Math.Round(project.Milestones.Count(milestone => milestone.IsCompleted) * 100d / project.Milestones.Count),
                 milestones = project.Milestones.OrderBy(milestone => milestone.Order).Select(milestone => new
                 {
-                    milestone.Id, milestone.Title, milestone.DueDate, milestone.IsCompleted, milestone.Order
+                    milestone.Id, milestone.Title, milestone.DueDate, milestone.IsCompleted, milestone.Order,
+                    approvalStatus = milestone.ApprovalStatus.ToString(), milestone.RequestedAt,
+                    milestone.DecidedAt, milestone.DecisionNote
                 })
             }).SingleOrDefaultAsync(cancellationToken);
         return project is null ? NotFound() : Ok(project);

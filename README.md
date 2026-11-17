@@ -97,6 +97,10 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 - Self-registration is off by default; client accounts should be created by invitation. Refresh tokens last 30 days and password reset links last one hour.
 - The generated UI is intentionally quiet and information-dense: understated indigo accents, readable status, responsive layouts, and reduced-motion support.
 
+## Assumptions
+
+- Only incomplete milestones can be sent for approval. A milestone can be re-requested after changes are requested; an approval decision is accepted only once per pending request. Approval completes the milestone, and a changes request requires a note.
+
 ## Current limitations
 
 This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and scheduled reminders, invoice numbers beyond generated unique identifiers, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.

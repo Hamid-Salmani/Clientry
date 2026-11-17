@@ -209,7 +209,19 @@ namespace ClientHub.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ApprovalStatus")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DecidedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionNote")
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly?>("DueDate")
@@ -222,6 +234,9 @@ namespace ClientHub.Infrastructure.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RequestedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")

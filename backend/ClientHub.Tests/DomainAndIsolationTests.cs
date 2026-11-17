@@ -56,6 +56,100 @@ public sealed class DomainAndIsolationTests
     public void ProjectTransitionsFollowAllowedForwardAndBackSteps(ProjectStatus current, ProjectStatus next, bool expected) =>
         Assert.Equal(expected, ProjectRules.CanTransition(current, next));
 
+    [Theory]
+    [InlineData(MilestoneApprovalStatus.NotRequired, false, true)]
+    [InlineData(MilestoneApprovalStatus.Pending, false, false)]
+    [InlineData(MilestoneApprovalStatus.Approved, false, true)]
+    [InlineData(MilestoneApprovalStatus.NotRequired, true, false)]
+    public void ApprovalCanOnlyBeRequestedForIncompleteNonPendingMilestones(
+        MilestoneApprovalStatus status, bool completed, bool expected) =>
+        Assert.Equal(expected, MilestoneApprovalRules.CanRequest(status, completed));
+
+    [Theory]
+    [InlineData(MilestoneApprovalStatus.Pending, true)]
+    [InlineData(MilestoneApprovalStatus.Approved, false)]
+    [InlineData(MilestoneApprovalStatus.ChangesRequested, false)]
+    [InlineData(MilestoneApprovalStatus.NotRequired, false)]
+    public void ApprovalCanOnlyBeDecidedWhilePending(MilestoneApprovalStatus status, bool expected) =>
+        Assert.Equal(expected, MilestoneApprovalRules.CanDecide(status));
+
+    [Fact]
+    public async Task ApprovalRequestAndDecisionNotifyBothSidesAndCompleteApprovedMilestone()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Approval Client", Notes = "" };
+        var admin = new User { Email = "admin@example.test", FullName = "Admin", Role = UserRole.Admin, PasswordHash = "" };
+        var member = new User { Email = "member@example.test", FullName = "Client Member", Role = UserRole.Client, ClientId = client.Id, PasswordHash = "" };
+        var project = new Project { ClientId = client.Id, Name = "Approval Project", Description = "", StartDate = new DateOnly(2026, 1, 1) };
+        var milestone = new Milestone { ClientId = client.Id, ProjectId = project.Id, Title = "Design review", Order = 1 };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        var emails = new CapturingEmailSender();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Frontend:BaseUrl"] = "https://portal.example.test"
+        }).Build();
+
+        await using (var adminDb = new ClientHubDbContext(options, new TestScope(null, admin.Id, false)))
+        {
+            await adminDb.Database.EnsureCreatedAsync();
+            adminDb.AddRange(client, admin, member, project, milestone);
+            await adminDb.SaveChangesAsync();
+            var controller = new ApprovalsController(adminDb, emails, configuration);
+            SetAuthenticatedUser(controller, admin.Id, UserRole.Admin);
+
+            Assert.IsType<NoContentResult>(await controller.RequestApproval(project.Id, milestone.Id, CancellationToken.None));
+            Assert.Equal(MilestoneApprovalStatus.Pending,
+                (await adminDb.Milestones.SingleAsync(item => item.Id == milestone.Id)).ApprovalStatus);
+            Assert.Single(await adminDb.Notifications.Where(item => item.UserId == member.Id).ToListAsync());
+        }
+
+        await using (var clientDb = new ClientHubDbContext(options, new TestScope(client.Id, member.Id, true)))
+        {
+            var controller = new ApprovalsController(clientDb, emails, configuration);
+            SetAuthenticatedUser(controller, member.Id, UserRole.Client, client.Id);
+            Assert.IsType<NoContentResult>(await controller.Decide(project.Id, milestone.Id,
+                new ApprovalsController.ApprovalDecisionRequest("Approved", null), CancellationToken.None));
+            var decided = await clientDb.Milestones.SingleAsync(item => item.Id == milestone.Id);
+            Assert.Equal(MilestoneApprovalStatus.Approved, decided.ApprovalStatus);
+            Assert.True(decided.IsCompleted);
+            Assert.Equal(member.Id, decided.DecidedById);
+            Assert.Contains(await clientDb.ActivityLogs.Select(item => item.Action).ToListAsync(), action => action == "Milestone approved");
+            Assert.Single(await clientDb.Notifications.IgnoreQueryFilters().Where(item => item.UserId == admin.Id).ToListAsync());
+        }
+
+        Assert.Equal(2, emails.Messages.Count);
+    }
+
+    [Fact]
+    public async Task ChangesRequestRequiresNoteAndARepeatedDecisionReturnsConflict()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Approval Client", Notes = "" };
+        var member = new User { Email = "member@example.test", FullName = "Client Member", Role = UserRole.Client, ClientId = client.Id, PasswordHash = "" };
+        var project = new Project { ClientId = client.Id, Name = "Approval Project", Description = "", StartDate = new DateOnly(2026, 1, 1) };
+        var milestone = new Milestone
+        {
+            ClientId = client.Id, ProjectId = project.Id, Title = "Design review", Order = 1,
+            ApprovalStatus = MilestoneApprovalStatus.Pending
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(client.Id, member.Id, true));
+        await db.Database.EnsureCreatedAsync();
+        db.AddRange(client, member, project, milestone);
+        await db.SaveChangesAsync();
+        var controller = new ApprovalsController(db, new CapturingEmailSender(), new ConfigurationBuilder().Build());
+        SetAuthenticatedUser(controller, member.Id, UserRole.Client, client.Id);
+
+        Assert.IsType<BadRequestObjectResult>(await controller.Decide(project.Id, milestone.Id,
+            new ApprovalsController.ApprovalDecisionRequest("ChangesRequested", "  "), CancellationToken.None));
+        milestone.ApprovalStatus = MilestoneApprovalStatus.Approved;
+        await db.SaveChangesAsync();
+        Assert.IsType<ConflictObjectResult>(await controller.Decide(project.Id, milestone.Id,
+            new ApprovalsController.ApprovalDecisionRequest("Approved", null), CancellationToken.None));
+    }
+
     [Fact]
     public async Task ClientQueryFiltersHideAnotherClientsResources()
     {
@@ -453,10 +547,12 @@ public sealed class DomainAndIsolationTests
         Assert.Equal("support@example.com", saved.SupportEmail);
     }
 
-    private static void SetAuthenticatedUser(ControllerBase controller, Guid userId)
+    private static void SetAuthenticatedUser(ControllerBase controller, Guid userId, UserRole? role = null, Guid? clientId = null)
     {
-        var identity = new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "test");
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId.ToString()) };
+        if (role.HasValue) claims.Add(new Claim(ClaimTypes.Role, role.Value.ToString()));
+        if (clientId.HasValue) claims.Add(new Claim("client_id", clientId.Value.ToString()));
+        var identity = new ClaimsIdentity(claims, "test");
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
@@ -480,6 +576,18 @@ public sealed class DomainAndIsolationTests
         public Task SendAsync(string recipient, string subject, string htmlBody,
             IReadOnlyDictionary<string, byte[]>? attachments, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Email is not used by this test.");
+    }
+
+    private sealed class CapturingEmailSender : IEmailSender
+    {
+        public List<(string Recipient, string Subject, string HtmlBody)> Messages { get; } = [];
+
+        public Task SendAsync(string recipient, string subject, string htmlBody,
+            IReadOnlyDictionary<string, byte[]>? attachments, CancellationToken cancellationToken)
+        {
+            Messages.Add((recipient, subject, htmlBody));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed record TestScope(Guid? ClientId, Guid? UserId, bool IsClient) : IRequestScope;
