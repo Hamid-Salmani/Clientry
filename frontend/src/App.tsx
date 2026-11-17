@@ -102,14 +102,16 @@ const teamInvitationSchema = z.object({
   fullName: z.string().trim().min(1, 'Enter your colleague’s name.').max(120, 'Name must be 120 characters or fewer.'),
   email: z.email('Enter a valid email address.').max(254, 'Email must be 254 characters or fewer.'),
 })
+const projectFileSchema = z.instanceof(File)
+  .refine((file) => file.size > 0, 'Choose a non-empty file.')
+  .refine((file) => file.size <= 10 * 1024 * 1024, 'Files must be 10 MB or smaller.')
+  .refine((file) => ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'].includes(file.type),
+    'Only PDF, PNG, JPEG, and TXT files are supported.')
 const projectRequestSchema = z.object({
   title: z.string().trim().min(1, 'Enter a request title.').max(160, 'Title must be 160 characters or fewer.'),
   description: z.string().trim().min(1, 'Describe the work you need.').max(4000, 'Description must be 4,000 characters or fewer.'),
   priority: z.enum(['Low', 'Normal', 'High']),
-  files: z.array(z.instanceof(File)).max(3, 'You can attach up to three files.').refine(
-    (files) => files.every((file) => file.size > 0 && file.size <= 10 * 1024 * 1024),
-    'Each attachment must be 10 MB or smaller.',
-  ),
+  files: z.array(projectFileSchema).max(3, 'You can attach up to three files.'),
 })
 const approvalDecisionSchema = z.object({
   decision: z.enum(['Approved', 'ChangesRequested']),
@@ -557,6 +559,9 @@ function App() {
 
   async function uploadFile(file: File, onProgress: (progress: number) => void) {
     if (!selectedProject) throw new Error('Choose a project before uploading.')
+    const parsedFile = projectFileSchema.safeParse(file)
+    if (!parsedFile.success)
+      throw new Error(parsedFile.error.issues[0]?.message ?? 'Choose a supported file.')
     await new Promise<void>((resolve, reject) => {
       const data = new FormData()
       data.append('file', file)
