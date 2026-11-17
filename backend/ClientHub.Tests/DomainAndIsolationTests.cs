@@ -16,6 +16,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 
 namespace ClientHub.Tests;
@@ -437,6 +438,61 @@ public sealed class DomainAndIsolationTests
         await db.SaveChangesAsync();
         Assert.IsType<BadRequestObjectResult>(await controller.Preview(projectA.Id, textFile.Id, CancellationToken.None));
         Assert.IsType<NotFoundResult>(await controller.Preview(projectB.Id, foreignFile.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task FileUploadsRejectBinaryTextAndMismatchedContentSignatures()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Upload Client", Notes = "" };
+        var user = new User
+        {
+            Email = "upload@example.test", FullName = "Uploader", Role = UserRole.Client,
+            ClientId = client.Id, PasswordHash = "hash"
+        };
+        var project = new Project
+        {
+            ClientId = client.Id, Name = "Upload project", Description = "",
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(client.Id, user.Id, true));
+        await db.Database.EnsureCreatedAsync();
+        db.AddRange(client, user, project);
+        await db.SaveChangesAsync();
+
+        var storedFiles = new Dictionary<string, byte[]>();
+        var controller = new FilesController(db, new MemoryFileStorage(storedFiles));
+        SetAuthenticatedUser(controller, user.Id, UserRole.Client, client.Id);
+        FormFile CreateFile(byte[] content, string name, string contentType) =>
+            new(new MemoryStream(content), 0, content.Length, "file", name)
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = contentType
+            };
+
+        var binaryText = CreateFile([0x00, 0x01, 0x02, 0xFF], "binary.txt", "text/plain");
+        Assert.IsType<BadRequestObjectResult>(
+            await controller.Upload(project.Id, binaryText, CancellationToken.None));
+
+        var invalidUtf8 = CreateFile([0xC3, 0x28], "invalid-utf8.txt", "text/plain");
+        Assert.IsType<BadRequestObjectResult>(
+            await controller.Upload(project.Id, invalidUtf8, CancellationToken.None));
+
+        var mismatchedPdf = CreateFile("not a PDF"u8.ToArray(), "document.pdf", "application/pdf");
+        Assert.IsType<BadRequestObjectResult>(
+            await controller.Upload(project.Id, mismatchedPdf, CancellationToken.None));
+
+        var disallowed = CreateFile("binary"u8.ToArray(), "program.exe", "application/octet-stream");
+        Assert.IsType<BadRequestObjectResult>(
+            await controller.Upload(project.Id, disallowed, CancellationToken.None));
+
+        var validText = CreateFile(Encoding.UTF8.GetBytes("A readable project note.\r\n"), "notes.txt", "text/plain");
+        Assert.IsType<CreatedAtActionResult>(
+            await controller.Upload(project.Id, validText, CancellationToken.None));
+        Assert.Single(await db.ProjectFiles.ToListAsync());
+        Assert.Single(storedFiles);
     }
 
     [Fact]

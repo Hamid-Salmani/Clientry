@@ -330,7 +330,7 @@ public sealed class AuthController(
             role = User.FindFirstValue(ClaimTypes.Role),
             clientRole = user?.ClientRole.ToString(),
             workspaceName = clientName ?? "Client workspace",
-            supportEmail = settings?.SupportEmail ?? "support@studionorth.example"
+            supportEmail = settings?.SupportEmail ?? "support@clientry.example"
         });
     }
 

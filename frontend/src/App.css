@@ -363,6 +363,7 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .comment-form .primary-button { min-height: 31px; font-size: 9px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 .login-page { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; background: #fff; }
+.invitation-page { grid-template-columns: 1fr; }
 .login-card { width: min(390px, calc(100% - 48px)); align-self: center; justify-self: center; padding: 40px 0; }
 .login-brand { padding: 0; }
 .login-copy { margin-top: 69px; }
@@ -378,11 +379,9 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .login-submit { width: 100%; height: 41px; margin-top: 4px; }
 .login-submit .icon { margin-left: auto; }
 .login-error { margin: -7px 0 12px; color: #b9625b; font-size: 10px; }
-.login-demo { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 23px; border-top: 1px solid #eff0f3; padding-top: 17px; }
-.login-demo > span { color: #989ca7; font-size: 9px; }
-.login-demo > div { display: flex; gap: 5px; }
-.login-demo button { border: 1px solid #ececf4; border-radius: 5px; padding: 6px 8px; background: white; color: #7375c3; font-size: 8px; cursor: pointer; }
-.login-demo button:hover { background: #f7f7ff; }
+.invitation-summary { display: flex; flex-direction: column; gap: 5px; margin-top: 23px; border: 1px solid #eceef3; border-radius: 8px; padding: 13px; }
+.invitation-summary strong { color: #4b4f5d; font-size: 11px; }
+.invitation-summary span { color: #9296a2; font-size: 10px; }
 .login-footer { margin-top: 45px; color: #b4b6bf; font-size: 9px; text-align: center; }
 .login-art { position: relative; display: grid; overflow: hidden; place-items: center; background: #f2f2fc; }
 .art-glow { position: absolute; width: 440px; height: 440px; border-radius: 50%; background: radial-gradient(circle, #e1e2fb 0, #e9e9fa99 43%, transparent 72%); }
@@ -525,13 +524,14 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 @media (max-width: 820px) {
   .sidebar { width: 64px; flex-basis: 64px; align-items: center; padding: 22px 8px 12px; }
   .brand { padding: 0; }
-  .brand > span, .workspace-meta, .nav-label, .nav-item:not(.active) { display: none; }
+  .brand > span, .workspace-meta, .nav-label { display: none; }
   .workspace-container { margin: 30px 0 20px; }
   .workspace-switch { width: 42px; justify-content: center; padding: 4px; border: 0; }
   .workspace-switch > .icon { display: none; }
   .workspace-popover { left: 48px; }
   .nav-list { width: 100%; justify-items: center; }
-  .nav-item { width: 42px; justify-content: center; padding: 11px 0; }
+  .nav-item { width: 42px; justify-content: center; gap: 0; padding: 11px 0; font-size: 0; }
+  .nav-item:not(.active) { display: flex; }
   .nav-item.active { display: flex; }
   .nav-item .nav-count { position: absolute; width: 7px; min-width: 7px; height: 7px; top: 5px; right: 5px; overflow: hidden; padding: 0; color: transparent; }
   .sidebar-bottom { width: 100%; }
@@ -656,10 +656,12 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 :root[data-theme="dark"] .project-row, :root[data-theme="dark"] .login-form input, :root[data-theme="dark"] .comment-form textarea, :root[data-theme="dark"] .download-button, :root[data-theme="dark"] .upload-button, :root[data-theme="dark"] .cancel-button { background: #20232e; color: #d9dbe4; }
 :root[data-theme="dark"] .modal-close { background: #303442; color: #c4c7d1; }
 :root[data-theme="dark"] .login-page { color: #e4e6ed; }
+:root[data-theme="dark"] .invitation-summary { border-color: #393d4b; }
+:root[data-theme="dark"] .invitation-summary strong { color: #e4e6ed; }
+:root[data-theme="dark"] .invitation-summary span { color: #a3a8b7; }
 :root[data-theme="dark"] .login-form input, :root[data-theme="dark"] .comment-form textarea { border-color: #393d4b; }
 :root[data-theme="dark"] .login-form label, :root[data-theme="dark"] .login-copy h1 { color: #e4e6ed; }
-:root[data-theme="dark"] .login-copy p, :root[data-theme="dark"] .login-demo > span { color: #a3a8b7; }
-:root[data-theme="dark"] .login-demo button { border-color: #393d4b; background: #252834; color: #c4c5ff; }
+:root[data-theme="dark"] .login-copy p { color: #a3a8b7; }
 :root[data-theme="dark"] .login-art { background: #1b1d29; }
 :root[data-theme="dark"] .art-card, :root[data-theme="dark"] .art-note { border-color: #373a4b; background: #252834ed; }
 :root[data-theme="dark"] .art-card > strong, :root[data-theme="dark"] .art-note strong { color: #e2e4eb; }

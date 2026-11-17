@@ -27,7 +27,8 @@ builder.Services.AddControllers();
 builder.Services.AddValidatorsFromAssemblyContaining<ClientHub.Api.Validators.ProjectRequestValidator>();
 builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+    options.CustomSchemaIds(type => type.FullName?.Replace('+', '.') ?? type.Name));
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:5173"])
         .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));

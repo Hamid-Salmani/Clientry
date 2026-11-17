@@ -18,7 +18,7 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
     public async Task<IActionResult> GetWorkspaceSettings(CancellationToken cancellationToken)
     {
         var settings = await db.WorkspaceSettings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
-        return Ok(settings ?? new WorkspaceSettings { Name = "Studio North", SupportEmail = "support@studionorth.example" });
+        return Ok(settings ?? new WorkspaceSettings { Name = "Clientry", SupportEmail = "support@clientry.example" });
     }
 
     [HttpPut("workspace-settings")]

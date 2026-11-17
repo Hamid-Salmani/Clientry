@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.IO.Compression;
+using System.Text;
 using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
@@ -70,6 +71,9 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         input.Position = 0;
         if (!HasValidSignature(extension, header, read))
             return BadRequest(new { message = "The file contents do not match the selected type." });
+        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) && !HasValidTextContent(input))
+            return BadRequest(new { message = "Text files must contain valid UTF-8 text without binary control characters." });
+        input.Position = 0;
 
         var storedPath = await storage.SaveAsync(input, cancellationToken);
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
@@ -253,6 +257,26 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         ".txt" => read >= 0,
         _ => false
     };
+
+    private static bool HasValidTextContent(Stream input)
+    {
+        try
+        {
+            using var reader = new StreamReader(input, new UTF8Encoding(false, true),
+                detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            var content = reader.ReadToEnd();
+            return !content.Any(character =>
+                char.IsControl(character) && character is not ('\r' or '\n' or '\t'));
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+        finally
+        {
+            input.Position = 0;
+        }
+    }
 
     private bool CanManageFile(Guid uploadedById) =>
         User.IsInRole("Admin") || Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) && userId == uploadedById;

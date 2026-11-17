@@ -80,6 +80,9 @@ const loginSchema = z.object({
   email: z.email('Enter a valid email address.').max(254, 'Email must be 254 characters or fewer.'),
   password: z.string().min(1, 'Enter your password.'),
 })
+const invitationPasswordSchema = z.object({
+  password: z.string().min(8, 'Your password must be at least 8 characters.'),
+})
 const registrationSchema = loginSchema.extend({
   fullName: z.string().trim().min(1, 'Enter your name.').max(120, 'Name must be 120 characters or fewer.'),
   password: z.string().min(8, 'Your password must be at least 8 characters.'),
@@ -196,8 +199,8 @@ function App() {
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [clients, setClients] = useState<ClientSummary[]>([])
   const [workspaceSettings, setWorkspaceSettings] = useState<AdminWorkspaceSettings>({
-    name: 'Studio North',
-    supportEmail: 'support@studionorth.example',
+    name: 'Clientry',
+    supportEmail: 'support@clientry.example',
   })
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [comments, setComments] = useState<Comment[]>([])
@@ -210,6 +213,7 @@ function App() {
   const routerNavigate = useNavigate()
   const queryClient = useQueryClient()
   const location = useLocation()
+  const invitationToken = location.pathname.match(/^\/accept-invite\/([^/]+)$/)?.[1]
   const projectRouteId = location.pathname.match(/^\/projects\/([0-9a-f-]+)$/i)?.[1]
   const activePage = location.pathname.startsWith('/team') ? (user?.clientRole === 'Owner' ? 'Team' : 'Overview')
     : location.pathname.startsWith('/notifications') ? 'Notifications'
@@ -301,6 +305,7 @@ function App() {
     queryFn: () => request<{ items: ApprovalItem[]; total: number }>('/approvals?page=1&pageSize=100', token),
     enabled: Boolean(token && user?.role === 'Client'),
   })
+  const refetchApprovals = approvalsQuery.refetch
   const clientOverviewQuery = useQuery({
     queryKey: ['client-overview', token],
     queryFn: () => request<ClientOverviewData>('/me/overview', token),
@@ -327,6 +332,11 @@ function App() {
       workspaceName: profileQuery.data.workspaceName, supportEmail: profileQuery.data.supportEmail,
     })
   }, [profileQuery.data])
+
+  useEffect(() => {
+    if (location.pathname.startsWith('/approvals') && user?.role === 'Client')
+      void refetchApprovals()
+  }, [location.pathname, user?.role, refetchApprovals])
 
   useEffect(() => {
     if (!profileQuery.isError) return
@@ -624,26 +634,37 @@ function App() {
   const navigationItems = admin
     ? ['Overview', 'Projects', 'Invoices', 'Clients', 'Requests']
     : ['Overview', 'Projects', 'Approvals', 'Requests', 'Invoices', ...(user?.clientRole === 'Owner' ? ['Team'] : [])]
-  if (!token || !user) return <Login
-    email={email}
-    setEmail={setEmail}
-    password={password}
-    setPassword={setPassword}
-    fullName={fullName}
-    setFullName={setFullName}
-    setIsRegisterMode={setIsRegisterMode}
-    onSubmit={isRegisterMode ? registerUser : logIn}
-    onToggleMode={() => { setIsRegisterMode((current) => !current); setLoginError('') }}
-    isRegisterMode={isRegisterMode}
-    error={loginError}
-  />
+  if (!token || !user) {
+    if (invitationToken) return <AcceptInvitationPage
+      token={decodeURIComponent(invitationToken)}
+      onBack={() => routerNavigate('/login')}
+      onAccepted={(result) => {
+        sessionStorage.setItem('clienthub-token', result.accessToken)
+        setUser({ name: result.name, role: result.role })
+        setToken(result.accessToken)
+        routerNavigate('/')
+      }}
+    />
+    return <Login
+      email={email}
+      setEmail={setEmail}
+      password={password}
+      setPassword={setPassword}
+      fullName={fullName}
+      setFullName={setFullName}
+      onSubmit={isRegisterMode ? registerUser : logIn}
+      onToggleMode={() => { setIsRegisterMode((current) => !current); setLoginError('') }}
+      isRegisterMode={isRegisterMode}
+      error={loginError}
+    />
+  }
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">c</div><span>clientry</span></div>
         <div className="workspace-container" ref={workspaceRef}>
-          <button className={`workspace-switch ${openPopover === 'workspace' ? 'open' : ''}`} aria-expanded={openPopover === 'workspace'} aria-controls="workspace-popover" onClick={() => setOpenPopover(openPopover === 'workspace' ? null : 'workspace')}>
+          <button className={`workspace-switch ${openPopover === 'workspace' ? 'open' : ''}`} aria-label={`${workspaceName} workspace`} aria-expanded={openPopover === 'workspace'} aria-controls="workspace-popover" onClick={() => setOpenPopover(openPopover === 'workspace' ? null : 'workspace')}>
             <span className="workspace-avatar"><Icon name="building" /></span>
             <span className="workspace-meta"><strong>{workspaceName}</strong><span>{admin ? 'Agency workspace' : 'Client workspace'}</span></span>
             <Icon name="chevron" />
@@ -658,7 +679,7 @@ function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace navigation">
           {navigationItems.map((item) => (
-            <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} aria-current={activePage === item ? 'page' : undefined} onClick={() => navigateTo(item)}>
+            <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} aria-label={item === 'Approvals' && (approvalsQuery.data?.total ?? 0) > 0 ? `${item}, ${approvalsQuery.data?.total} pending` : item} title={item} aria-current={activePage === item ? 'page' : undefined} onClick={() => navigateTo(item)}>
               <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Approvals' ? 'check' : item === 'Invoices' ? 'file' : item === 'Requests' ? 'upload' : 'users'} />{item}
               {item === 'Invoices' && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <span className="nav-count">{invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').length}</span>}
               {item === 'Approvals' && (approvalsQuery.data?.total ?? 0) > 0 && <span className="nav-count">{approvalsQuery.data?.total}</span>}
@@ -666,7 +687,7 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className={`nav-item muted ${activePage === 'Settings' ? 'active' : ''}`} aria-current={activePage === 'Settings' ? 'page' : undefined} onClick={() => navigateTo('Settings')}><Icon name="settings" />Settings</button>
+          <button className={`nav-item muted ${activePage === 'Settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={activePage === 'Settings' ? 'page' : undefined} onClick={() => navigateTo('Settings')}><Icon name="settings" />Settings</button>
           <div className="profile">
             <button className="profile-account" onClick={() => navigateTo('Account')} aria-label={`Open ${user.name}'s account`}>
               <span className="profile-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>
@@ -731,10 +752,10 @@ function App() {
   )
 }
 
-function Login({ email, setEmail, password, setPassword, fullName, setFullName, onSubmit, onToggleMode, isRegisterMode, setIsRegisterMode, error }: {
+function Login({ email, setEmail, password, setPassword, fullName, setFullName, onSubmit, onToggleMode, isRegisterMode, error }: {
   email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void
   fullName: string; setFullName: (value: string) => void; onSubmit: (event: FormEvent) => void
-  onToggleMode: () => void; isRegisterMode: boolean; setIsRegisterMode: (value: boolean) => void; error: string
+  onToggleMode: () => void; isRegisterMode: boolean; error: string
 }) {
   return <main className="login-page">
     <section className="login-card">
@@ -754,7 +775,6 @@ function Login({ email, setEmail, password, setPassword, fullName, setFullName, 
       <button className="text-button login-toggle" type="button" onClick={onToggleMode}>
         {isRegisterMode ? 'Already have an account? Sign in' : 'Need an account? Create one'}
       </button>
-      <div className="login-demo"><span>Try a demo workspace</span><div><button type="button" onClick={() => { setEmail('clientA@demo.com'); setPassword('DemoPass!234'); setIsRegisterMode(false) }}>Client portal</button><button type="button" onClick={() => { setEmail('admin@demo.com'); setPassword('DemoPass!234'); setIsRegisterMode(false) }}>Agency admin</button></div></div>
       <p className="login-footer">Secure client collaboration, made simple.</p>
     </section>
     <aside className="login-art" aria-hidden="true"><div className="art-glow" /><div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" /><div className="art-card"><div className="art-card-head"><span className="art-dot" /><span>CLIENTRY WORKSPACE</span></div><div className="art-brand-mark">c</div><strong>Good work, connected.</strong><small>Projects, conversations, files, and invoices.</small><div className="art-progress"><i /></div><div className="art-progress-label"><span>One shared workspace</span></div></div><div className="art-note"><span className="note-avatar"><Icon name="layers" /></span><div><strong>Everything in one place</strong><p>Keep projects and updates together.</p></div></div><div className="art-stamp">Thoughtfully<br />connected.</div></aside>
@@ -1081,6 +1101,71 @@ function ClientTeam({ token }: { token: string }) {
       </div>)}</div>
     </section>}
   </div>
+}
+
+function AcceptInvitationPage({ token, onBack, onAccepted }: {
+  token: string
+  onBack: () => void
+  onAccepted: (result: { accessToken: string; name: string; role: User['role'] }) => void
+}) {
+  const invitationQuery = useQuery({
+    queryKey: ['invitation', token],
+    queryFn: () => request<{ email: string; fullName: string; clientName: string }>(
+      `/auth/invitations/${encodeURIComponent(token)}`, '',
+    ),
+  })
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function accept(event: FormEvent) {
+    event.preventDefault()
+    setError('')
+    const parsed = invitationPasswordSchema.safeParse({ password })
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Choose a valid password.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const result = await request<{ accessToken: string; name: string; role: User['role'] }>(
+        `/auth/invitations/${encodeURIComponent(token)}/accept`, '',
+        { method: 'POST', body: JSON.stringify(parsed.data) },
+      )
+      onAccepted(result)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to accept this invitation.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <main className="login-page invitation-page">
+    <section className="login-card">
+      <div className="brand login-brand"><div className="brand-mark">c</div><span>clientry</span></div>
+      <div className="login-copy"><div className="eyebrow">JOIN YOUR WORKSPACE</div><h1>Accept your invitation.</h1>
+        <p>{invitationQuery.data ? `Join ${invitationQuery.data.clientName} and collaborate with your team.` : 'Set up your account to join your team.'}</p>
+      </div>
+      {invitationQuery.isLoading ? <div className="loading-bar" role="status" aria-label="Loading invitation" /> :
+        invitationQuery.isError ? <div className="login-error" role="alert">
+          {invitationQuery.error instanceof Error ? invitationQuery.error.message : 'This invitation is invalid or has expired.'}
+        </div> : invitationQuery.data && <>
+          <div className="invitation-summary"><strong>{invitationQuery.data.fullName}</strong><span>{invitationQuery.data.email}</span></div>
+          <form className="login-form" onSubmit={(event) => void accept(event)}>
+            <label htmlFor="invitation-password">Create a password</label>
+            <input id="invitation-password" type="password" autoComplete="new-password" minLength={8}
+              value={password} onChange={(event) => setPassword(event.target.value)} required />
+            {error && <div className="login-error" role="alert">{error}</div>}
+            <button className="primary-button login-submit" disabled={busy}>
+              {busy ? 'Accepting invitation…' : 'Accept invitation'} <Icon name="arrow" />
+            </button>
+          </form>
+        </>}
+      <button className="text-button login-toggle" type="button" onClick={onBack}>Back to sign in</button>
+      <p className="login-footer">Secure client collaboration, made simple.</p>
+    </section>
+  </main>
 }
 
 function Overview({ greeting, admin, projects, invoices, metrics, supportEmail, clientOverview, clientOverviewLoading, clientOverviewError, onOpenProject, onOpenProjects, onOpenInvoices, onOpenApprovals, onOpenNotifications, onCreateProject }: {
