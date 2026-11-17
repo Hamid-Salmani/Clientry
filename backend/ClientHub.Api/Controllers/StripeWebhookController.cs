@@ -44,12 +44,14 @@ public sealed class StripeWebhookController(
             !string.Equals(intent.Currency, invoice.Currency, StringComparison.OrdinalIgnoreCase) ||
             invoice.Status is not (InvoiceStatus.Sent or InvoiceStatus.Overdue))
             return BadRequest();
+        var paidAt = DateTime.UtcNow;
         db.Payments.Add(new Payment
         {
             InvoiceId = invoice.Id, StripePaymentIntentId = intent.Id,
-            Amount = invoice.Total, Status = "Succeeded", PaidAt = DateTime.UtcNow
+            Amount = invoice.Total, Status = "Succeeded", PaidAt = paidAt
         });
         invoice.Status = InvoiceStatus.Paid;
+        invoice.StatusChangedAt = paidAt;
         var recipientIds = await db.Users
             .Where(user => user.ClientId == invoice.ClientId && user.IsActive)
             .Select(user => user.Id).ToListAsync(cancellationToken);

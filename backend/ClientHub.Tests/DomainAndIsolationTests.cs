@@ -38,6 +38,18 @@ public sealed class DomainAndIsolationTests
         Assert.Equal(326m, invoice.Total);
     }
 
+    [Fact]
+    public void InvoiceTotalIncludesTaxAndDiscount()
+    {
+        var invoice = new Invoice
+        {
+            Number = "INV-2", Currency = "USD", DiscountAmount = 20, TaxAmount = 15,
+            IssueDate = new DateOnly(2026, 11, 1), DueDate = new DateOnly(2026, 11, 30),
+            Lines = [new InvoiceLineItem { Description = "Design", Quantity = 2, UnitPrice = 100 }]
+        };
+        Assert.Equal(195m, invoice.Total);
+    }
+
     [Theory]
     [InlineData(InvoiceStatus.Draft, InvoiceStatus.Sent, true)]
     [InlineData(InvoiceStatus.Draft, InvoiceStatus.Paid, false)]
@@ -425,6 +437,103 @@ public sealed class DomainAndIsolationTests
     }
 
     [Fact]
+    public async Task InvoiceDetailsAndReceiptsRespectClientScopeAndPaidStatus()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var clientA = new Client { CompanyName = "Invoice Client A", Notes = "" };
+        var clientB = new Client { CompanyName = "Invoice Client B", Notes = "" };
+        var userA = new User { Email = "invoice-a@example.test", FullName = "A", Role = UserRole.Client, ClientId = clientA.Id, PasswordHash = "hash" };
+        var invoiceA = new Invoice
+        {
+            ClientId = clientA.Id, Number = "PAID-A", Currency = "USD", Status = InvoiceStatus.Paid,
+            IssueDate = new DateOnly(2026, 11, 1), DueDate = new DateOnly(2026, 11, 15),
+            Lines = [new InvoiceLineItem { Description = "Design", Quantity = 1, UnitPrice = 100 }]
+        };
+        var invoiceB = new Invoice
+        {
+            ClientId = clientB.Id, Number = "PAID-B", Currency = "USD", Status = InvoiceStatus.Paid,
+            IssueDate = new DateOnly(2026, 11, 1), DueDate = new DateOnly(2026, 11, 15),
+            Lines = [new InvoiceLineItem { Description = "Private work", Quantity = 1, UnitPrice = 200 }]
+        };
+        var unpaid = new Invoice
+        {
+            ClientId = clientA.Id, Number = "UNPAID-A", Currency = "USD", Status = InvoiceStatus.Sent,
+            IssueDate = new DateOnly(2026, 11, 1), DueDate = new DateOnly(2026, 11, 15),
+            Lines = [new InvoiceLineItem { Description = "Work", Quantity = 1, UnitPrice = 50 }]
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using (var seed = new ClientHubDbContext(options, new TestScope(null, null, false)))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.AddRange(clientA, clientB, userA, invoiceA, invoiceB, unpaid,
+                new Payment
+                {
+                    InvoiceId = invoiceA.Id, StripePaymentIntentId = "receipt-payment-a",
+                    Amount = 100, Status = "Succeeded", PaidAt = DateTime.UtcNow
+                },
+                new Payment
+                {
+                    InvoiceId = invoiceB.Id, StripePaymentIntentId = "receipt-payment-b",
+                    Amount = 200, Status = "Succeeded", PaidAt = DateTime.UtcNow
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = new ClientHubDbContext(options, new TestScope(clientA.Id, userA.Id, true));
+        var controller = new InvoicesController(db, new InvoicePdfService());
+        SetAuthenticatedUser(controller, userA.Id, UserRole.Client, clientA.Id);
+        var detail = Assert.IsType<OkObjectResult>(await controller.Get(invoiceA.Id, CancellationToken.None));
+        using var detailJson = JsonDocument.Parse(JsonSerializer.Serialize(detail.Value));
+        Assert.Equal("PAID-A", detailJson.RootElement.GetProperty("Number").GetString());
+        Assert.Equal(100m, detailJson.RootElement.GetProperty("lineSubtotal").GetDecimal());
+        Assert.Single(detailJson.RootElement.GetProperty("payments").EnumerateArray());
+        Assert.IsType<NotFoundResult>(await controller.Get(invoiceB.Id, CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await controller.Receipt(unpaid.Id, CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await controller.Receipt(invoiceB.Id, CancellationToken.None));
+        var receipt = Assert.IsType<FileContentResult>(await controller.Receipt(invoiceA.Id, CancellationToken.None));
+        Assert.Equal("application/pdf", receipt.ContentType);
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(receipt.FileContents));
+    }
+
+    [Fact]
+    public async Task OnlyClientOwnerCanUpdateBillingDetails()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Billing Client", Notes = "" };
+        var owner = new User
+        {
+            Email = "billing-owner@example.test", FullName = "Owner", Role = UserRole.Client,
+            ClientRole = ClientRole.Owner, ClientId = client.Id, PasswordHash = "hash"
+        };
+        var member = new User
+        {
+            Email = "billing-member@example.test", FullName = "Member", Role = UserRole.Client,
+            ClientRole = ClientRole.Member, ClientId = client.Id, PasswordHash = "hash"
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(client.Id, owner.Id, true));
+        await db.Database.EnsureCreatedAsync();
+        db.AddRange(client, owner, member);
+        await db.SaveChangesAsync();
+        var controller = new ClientBillingController(db);
+        var request = new ClientBillingController.BillingDetailsRequest(
+            "Billing Client LLC", "TAX-1", "billing@example.test; finance@example.test", "1 Main Street");
+
+        SetAuthenticatedUser(controller, member.Id, UserRole.Client, client.Id);
+        Assert.IsType<OkObjectResult>(await controller.Get(CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.Update(request, CancellationToken.None));
+
+        SetAuthenticatedUser(controller, owner.Id, UserRole.Client, client.Id);
+        Assert.IsType<NoContentResult>(await controller.Update(request, CancellationToken.None));
+        var savedClient = await db.Clients.SingleAsync();
+        Assert.Equal("Billing Client LLC", savedClient.LegalName);
+        Assert.Equal("TAX-1", savedClient.TaxId);
+        Assert.Equal("billing@example.test; finance@example.test", savedClient.BillingEmails);
+    }
+
+    [Fact]
     public async Task DemoInitializationRepairsExistingClientCredentialsAndUnlocksThem()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -553,6 +662,7 @@ public sealed class DomainAndIsolationTests
         var created = await db.Users.SingleAsync(user => user.Email == "new-client@example.test");
         Assert.Equal(client.Id, created.ClientId);
         Assert.Equal(UserRole.Client, created.Role);
+        Assert.Equal(ClientRole.Owner, created.ClientRole);
         Assert.NotNull((await db.Invitations.SingleAsync(x => x.Email == created.Email)).AcceptedAt);
         Assert.IsType<NotFoundObjectResult>(await controller.AcceptInvitation(
             inviteToken, new AuthController.AcceptInvitationRequest("AnotherPass!234"), CancellationToken.None));

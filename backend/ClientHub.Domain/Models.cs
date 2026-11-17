@@ -1,6 +1,7 @@
 namespace ClientHub.Domain;
 
 public enum UserRole { Admin, Client }
+public enum ClientRole { Member, Owner }
 public enum ProjectStatus { Pending, InProgress, InReview, Delivered, Archived }
 public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Void }
 public enum MilestoneApprovalStatus { NotRequired, Pending, Approved, ChangesRequested }
@@ -14,6 +15,7 @@ public sealed class User
     public required string PasswordHash { get; set; }
     public required string FullName { get; set; }
     public UserRole Role { get; set; }
+    public ClientRole ClientRole { get; set; } = ClientRole.Member;
     public Guid? ClientId { get; set; }
     public bool IsActive { get; set; } = true;
     public int FailedLoginAttempts { get; set; }
@@ -29,6 +31,10 @@ public sealed class Client
     public required string CompanyName { get; set; }
     public required string Notes { get; set; }
     public bool IsActive { get; set; } = true;
+    public string? LegalName { get; set; }
+    public string? TaxId { get; set; }
+    public string? BillingEmails { get; set; }
+    public string? BillingAddress { get; set; }
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<Project> Projects { get; set; } = new List<Project>();
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();
@@ -132,7 +138,12 @@ public sealed class Invoice
     public DateOnly DueDate { get; set; }
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
     public required string Currency { get; set; }
-    public decimal Total => Lines.Sum(x => x.Quantity * x.UnitPrice);
+    public decimal DiscountAmount { get; set; }
+    public decimal TaxAmount { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? SentAt { get; set; }
+    public DateTime? StatusChangedAt { get; set; }
+    public decimal Total => Math.Max(0, Lines.Sum(x => x.Quantity * x.UnitPrice) - DiscountAmount + TaxAmount);
     public Client? Client { get; set; }
     public ICollection<InvoiceLineItem> Lines { get; set; } = new List<InvoiceLineItem>();
     public ICollection<Payment> Payments { get; set; } = new List<Payment>();

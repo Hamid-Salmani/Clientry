@@ -42,7 +42,13 @@ type ClientOverviewData = {
 type Invoice = {
   id: string; clientId: string; number: string; issueDate: string; dueDate: string
   status: string; total: number; currency: string
+  discountAmount?: number; taxAmount?: number
   lines: { description: string; quantity: number; unitPrice: number }[]
+}
+type InvoiceDetails = Invoice & {
+  lineSubtotal: number; discountAmount: number; taxAmount: number
+  payments: { amount: number; status: string; paidAt?: string; stripePaymentIntentId: string }[]
+  statusTimeline: { status: string; at?: string }[]
 }
 type ClientSummary = { id: string; companyName: string; contact?: string; activeProjects: number; isActive: boolean }
 type ClientDetails = {
@@ -595,7 +601,9 @@ function App() {
           ) : activePage === 'Settings' ? (
             <Settings key={`${workspaceSettings.name}:${workspaceSettings.supportEmail}`} workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
           ) : activePage === 'Account' ? (
-            <Account user={user} workspaceName={workspaceName} onSignOut={signOut} />
+            location.pathname === '/account/billing'
+              ? <ClientBilling token={token} />
+              : <Account user={user} workspaceName={workspaceName} admin={Boolean(admin)} onBilling={() => routerNavigate('/account/billing')} onSignOut={signOut} />
           ) : (
             <Clients clients={clients} token={token} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           )}
@@ -721,7 +729,9 @@ function PreferenceToggle({ title, description, checked, onChange }: {
   return <label className="preference-row"><span><strong>{title}</strong><small>{description}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-track" aria-hidden="true" /></label>
 }
 
-function Account({ user, workspaceName, onSignOut }: { user: User; workspaceName: string; onSignOut: () => void }) {
+function Account({ user, workspaceName, admin, onBilling, onSignOut }: {
+  user: User; workspaceName: string; admin: boolean; onBilling: () => void; onSignOut: () => void
+}) {
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">YOUR PROFILE</div><h1>Account<span className="heading-period">.</span></h1><p>Your account and workspace details.</p></div></div>
     <section className="panel account-panel">
@@ -729,8 +739,59 @@ function Account({ user, workspaceName, onSignOut }: { user: User; workspaceName
       <div className="account-detail"><span>Account name</span><strong>{user.name}</strong></div>
       <div className="account-detail"><span>Role</span><strong>{user.role === 'Admin' ? 'Agency admin' : 'Client'}</strong></div>
       <div className="account-detail"><span>Workspace</span><strong>{workspaceName}</strong></div>
+      {!admin && <button className="cancel-button account-signout" onClick={onBilling}>Billing details <Icon name="arrow" /></button>}
       <button className="cancel-button account-signout" onClick={onSignOut}><Icon name="logout" /> Sign out</button>
     </section>
+  </div>
+}
+
+function ClientBilling({ token }: { token: string }) {
+  const navigate = useNavigate()
+  const billingQuery = useQuery({
+    queryKey: ['billing-details', token],
+    queryFn: () => request<{ legalName?: string; taxId?: string; billingEmails?: string; billingAddress?: string; canEdit: boolean }>('/me/billing', token),
+    enabled: Boolean(token),
+  })
+  const [legalName, setLegalName] = useState('')
+  const [taxId, setTaxId] = useState('')
+  const [billingEmails, setBillingEmails] = useState('')
+  const [billingAddress, setBillingAddress] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  useEffect(() => {
+    if (!billingQuery.data) return
+    setLegalName(billingQuery.data.legalName ?? '')
+    setTaxId(billingQuery.data.taxId ?? '')
+    setBillingEmails(billingQuery.data.billingEmails ?? '')
+    setBillingAddress(billingQuery.data.billingAddress ?? '')
+  }, [billingQuery.data])
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true); setError(''); setSaved(false)
+    try {
+      await request('/me/billing', token, {
+        method: 'PUT', body: JSON.stringify({ legalName, taxId, billingEmails, billingAddress }),
+      })
+      await billingQuery.refetch()
+      setSaved(true)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save billing details.') }
+    finally { setBusy(false) }
+  }
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">ACCOUNT</div><h1>Billing details<span className="heading-period">.</span></h1><p>These details appear on invoices and paid receipts.</p></div><button className="cancel-button" onClick={() => navigate('/account')}>Back to account</button></div>
+    {error && <div className="alert" role="alert">{error}</div>}
+    {billingQuery.isError && <div className="alert" role="alert">{billingQuery.error instanceof Error ? billingQuery.error.message : 'Unable to load billing details.'}</div>}
+    {billingQuery.isLoading ? <section className="panel full-panel"><div className="loading-bar" role="status" aria-label="Loading billing details" /></section> :
+      <form className="panel request-form billing-form" onSubmit={(event) => void save(event)}>
+        <label>Legal name<input value={legalName} onChange={(event) => setLegalName(event.target.value)} maxLength={160} readOnly={!billingQuery.data?.canEdit} /></label>
+        <label>Tax ID<input value={taxId} onChange={(event) => setTaxId(event.target.value)} maxLength={80} readOnly={!billingQuery.data?.canEdit} /></label>
+        <label>Billing email(s)<input type="text" value={billingEmails} onChange={(event) => setBillingEmails(event.target.value)} maxLength={500} placeholder="billing@example.com; finance@example.com" readOnly={!billingQuery.data?.canEdit} /></label>
+        <label>Billing address<textarea value={billingAddress} onChange={(event) => setBillingAddress(event.target.value)} maxLength={1000} rows={4} readOnly={!billingQuery.data?.canEdit} /></label>
+        {saved && <p className="billing-saved" role="status">Billing details saved.</p>}
+        {!billingQuery.data?.canEdit && <p className="request-file-hint">Only the client owner can change billing details.</p>}
+        {billingQuery.data?.canEdit && <div className="request-form-actions"><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save billing details'}</button></div>}
+      </form>}
   </div>
 }
 
@@ -1053,6 +1114,8 @@ function formatBytes(bytes: number) {
 function Invoices({ invoices, token, admin, clients, onChanged }: {
   invoices: Invoice[]; token: string; admin: boolean; clients: ClientSummary[]; onChanged: () => void
 }) {
+  const navigate = useNavigate()
+  const invoiceId = useLocation().pathname.match(/^\/invoices\/([0-9a-f-]+)$/i)?.[1]
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null)
@@ -1101,13 +1164,14 @@ function Invoices({ invoices, token, admin, clients, onChanged }: {
       URL.revokeObjectURL(url)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to export invoices.') }
   }
+  if (invoiceId) return <InvoiceDetailPage invoiceId={invoiceId} token={token} admin={admin} onBack={() => navigate('/invoices')} />
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>Invoices<span className="heading-period">.</span></h1><p>Everything related to your billing, all together.</p></div><div className="invoice-heading-actions"><span className="invoice-total">{invoices.length} total</span>{admin && <><button className="cancel-button" onClick={() => void exportCsv()}>Export CSV</button><button className="primary-button" onClick={() => { const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 30); setNewInvoiceDueDate(dueDate.toISOString().slice(0, 10)); setCreating(true) }}>＋ New invoice</button></>}</div></div>
     {error && <div className="alert" role="alert">{error}</div>}
     <section className="panel full-panel">
       <div className="invoice-table-head"><span>INVOICE</span><span>ISSUED</span><span>DUE DATE</span><span>STATUS</span><span>AMOUNT</span><span /></div>
       {invoices.length ? invoices.map((invoice) => <div className="invoice-table-row" key={invoice.id}>
-        <div className="invoice-number"><span className="invoice-file"><Icon name="file" /></span><strong>{invoice.number}</strong></div>
+        <div className="invoice-number"><span className="invoice-file"><Icon name="file" /></span><button className="invoice-detail-link" onClick={() => navigate(`/invoices/${invoice.id}`)}>{invoice.number}</button></div>
         <span>{new Date(invoice.issueDate).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
         <span>{new Date(invoice.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
         <span className={`status-pill status-${invoice.status.toLowerCase()}`}>{invoice.status}</span>
@@ -1140,6 +1204,53 @@ function Invoices({ invoices, token, admin, clients, onChanged }: {
   </div>
 }
 
+function InvoiceDetailPage({ invoiceId, token, admin, onBack }: {
+  invoiceId: string; token: string; admin: boolean; onBack: () => void
+}) {
+  const detailQuery = useQuery({
+    queryKey: ['invoice-detail', token, invoiceId],
+    queryFn: () => request<InvoiceDetails>(`/invoices/${invoiceId}`, token),
+  })
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function downloadReceipt() {
+    setBusy(true); setError('')
+    try {
+      const response = await fetch(`${apiBase}/api/invoices/${invoiceId}/receipt.pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) throw new Error(`Receipt download failed (${response.status}).`)
+      const url = URL.createObjectURL(await response.blob())
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${detailQuery.data?.number ?? 'invoice'}-receipt.pdf`; anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to download receipt.') }
+    finally { setBusy(false) }
+  }
+  if (detailQuery.isLoading) return <div className="page-enter"><div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>Invoice details<span className="heading-period">.</span></h1></div></div><section className="panel full-panel"><div className="loading-bar" role="status" aria-label="Loading invoice details" /></section></div>
+  const invoice = detailQuery.data
+  if (detailQuery.isError || !invoice) return <div className="page-enter"><div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>Invoice not found<span className="heading-period">.</span></h1><p>This invoice is unavailable to your account.</p></div><button className="cancel-button" onClick={onBack}>Back to invoices</button></div><div className="alert" role="alert">{detailQuery.error instanceof Error ? detailQuery.error.message : 'Invoice not found.'}</div></div>
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>{invoice.number}<span className="heading-period">.</span></h1><p>Issued {new Date(invoice.issueDate).toLocaleDateString()} · Due {new Date(invoice.dueDate).toLocaleDateString()}</p></div><div className="invoice-heading-actions"><span className={`status-pill status-${invoice.status.toLowerCase()}`}>{invoice.status}</span><button className="cancel-button" onClick={onBack}>Back to invoices</button></div></div>
+    {error && <div className="alert" role="alert">{error}</div>}
+    <div className="invoice-detail-grid">
+      <section className="panel invoice-detail-panel">
+        <div className="panel-heading"><div><h2>Line items</h2><p>Itemized charges and totals.</p></div></div>
+        <div className="invoice-detail-lines">{invoice.lines.map((line, index) => <div className="invoice-detail-line" key={`${line.description}-${index}`}><span><strong>{line.description}</strong><small>{line.quantity} × {new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(line.unitPrice)}</small></span><b>{new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(line.quantity * line.unitPrice)}</b></div>)}</div>
+        <div className="invoice-detail-totals"><div><span>Subtotal</span><strong>{new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(invoice.lineSubtotal)}</strong></div><div><span>Discount</span><strong>−{new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(invoice.discountAmount)}</strong></div><div><span>Tax</span><strong>{new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(invoice.taxAmount)}</strong></div><div className="grand-total"><span>Total</span><strong>{new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(invoice.total)}</strong></div></div>
+        {invoice.status === 'Paid' && !admin && <button className="primary-button receipt-button" onClick={() => void downloadReceipt()} disabled={busy}>{busy ? 'Preparing receipt…' : 'Download receipt PDF'}</button>}
+      </section>
+      <section className="panel invoice-detail-panel">
+        <div className="panel-heading"><div><h2>Payment history</h2><p>Recorded payments for this invoice.</p></div></div>
+        {invoice.payments.length ? invoice.payments.map((payment, index) => <div className="invoice-payment-row" key={`${payment.stripePaymentIntentId}-${index}`}><span><strong>{payment.status}</strong><small>{payment.paidAt ? new Date(payment.paidAt).toLocaleString() : 'Date unavailable'} · {payment.stripePaymentIntentId}</small></span><b>{new Intl.NumberFormat('en-US', { style: 'currency', currency: invoice.currency }).format(payment.amount)}</b></div>) : <EmptyState title="No payments recorded" text="Payments will appear here after they are confirmed." />}
+      </section>
+      <section className="panel invoice-detail-panel invoice-timeline-panel">
+        <div className="panel-heading"><div><h2>Status timeline</h2><p>Invoice lifecycle updates.</p></div></div>
+        {invoice.statusTimeline.map((event, index) => <div className="invoice-timeline-event" key={`${event.status}-${index}`}><span className="timeline-dot" /><span><strong>{event.status}</strong><small>{event.at ? new Date(event.at).toLocaleString() : 'Date unavailable'}</small></span></div>)}
+      </section>
+    </div>
+  </div>
+}
+
 function InvoiceDraftModal({ invoice, clients, token, initialDueDate, onClose, onSaved }: {
   invoice: Invoice | null
   clients: ClientSummary[]
@@ -1150,6 +1261,8 @@ function InvoiceDraftModal({ invoice, clients, token, initialDueDate, onClose, o
 }) {
   const [clientId, setClientId] = useState(invoice?.clientId ?? clients[0]?.id ?? '')
   const [dueDate, setDueDate] = useState(invoice?.dueDate ?? initialDueDate)
+  const [discountAmount, setDiscountAmount] = useState(invoice?.discountAmount ?? 0)
+  const [taxAmount, setTaxAmount] = useState(invoice?.taxAmount ?? 0)
   const [lines, setLines] = useState(() => invoice?.lines.map((line) => ({ ...line })) ?? [{ description: '', quantity: 1, unitPrice: 0 }])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1164,7 +1277,7 @@ function InvoiceDraftModal({ invoice, clients, token, initialDueDate, onClose, o
     try {
       await request(invoice ? `/invoices/${invoice.id}` : '/invoices', token, {
         method: invoice ? 'PUT' : 'POST',
-        body: JSON.stringify({ clientId, projectId: null, dueDate, currency: 'USD', lines }),
+        body: JSON.stringify({ clientId, projectId: null, dueDate, currency: 'USD', lines, discountAmount, taxAmount }),
       })
       onSaved()
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save the invoice.') }
@@ -1180,6 +1293,7 @@ function InvoiceDraftModal({ invoice, clients, token, initialDueDate, onClose, o
           {clients.filter((client) => client.isActive || client.id === invoice?.clientId).map((client) => <option key={client.id} value={client.id}>{client.companyName}</option>)}
         </select></label>
         <label>Due date<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} required /></label>
+        <div className="date-fields"><label>Discount amount<input type="number" min="0" step="0.01" value={discountAmount} onChange={(event) => setDiscountAmount(Number(event.target.value))} /></label><label>Tax amount<input type="number" min="0" step="0.01" value={taxAmount} onChange={(event) => setTaxAmount(Number(event.target.value))} /></label></div>
         <div className="invoice-line-editor">
           {lines.map((line, index) => <div className="invoice-line-edit" key={index}>
             <label>Description<input value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} maxLength={240} required /></label>

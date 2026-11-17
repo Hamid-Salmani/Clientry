@@ -124,6 +124,9 @@ public sealed class AuthController(
             FullName = invitation.FullName,
             ClientId = invitation.ClientId,
             Role = UserRole.Client,
+            ClientRole = await db.Users.AnyAsync(existing => existing.ClientId == invitation.ClientId, cancellationToken)
+                ? ClientRole.Member
+                : ClientRole.Owner,
             PasswordHash = string.Empty,
             IsActive = true
         };

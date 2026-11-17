@@ -31,16 +31,31 @@ public static class DemoData
             user.FailedLoginAttempts = 0;
             user.LockedUntil = null;
             user.IsActive = true;
+            user.ClientRole = user.Role == UserRole.Client ? ClientRole.Owner : ClientRole.Member;
         }
 
         if (!await db.Users.AnyAsync())
         {
-            var seedClientA = new Client { CompanyName = "Northstar Studio", Notes = "Brand and digital design partner" };
-            var seedClientB = new Client { CompanyName = "Juniper & Co.", Notes = "Advisory client" };
+            var seedClientA = new Client
+            {
+                CompanyName = "Northstar Studio", Notes = "Brand and digital design partner",
+                LegalName = "Northstar Studio LLC", BillingEmails = "billing@northstar.example",
+                BillingAddress = "100 Market Street, San Francisco, CA"
+            };
+            var seedClientB = new Client
+            {
+                CompanyName = "Juniper & Co.", Notes = "Advisory client",
+                LegalName = "Juniper and Company", TaxId = "DEMO-2048",
+                BillingEmails = "accounts@juniper.example", BillingAddress = "22 Pine Avenue, Portland, OR"
+            };
 
             User NewUser(string email, string name, UserRole role, Guid? clientId)
             {
-                var user = new User { Email = email, FullName = name, Role = role, ClientId = clientId, PasswordHash = string.Empty };
+                var user = new User
+                {
+                    Email = email, FullName = name, Role = role, ClientId = clientId, PasswordHash = string.Empty,
+                    ClientRole = role == UserRole.Client ? ClientRole.Owner : ClientRole.Member
+                };
                 user.PasswordHash = hasher.HashPassword(user, DemoPassword);
                 return user;
             }
@@ -67,6 +82,9 @@ public static class DemoData
                 ClientId = seedClientA.Id, ProjectId = projectA.Id, Number = "INV-2026-001",
                 IssueDate = new DateOnly(2026, 10, 5), DueDate = new DateOnly(2026, 11, 30),
                 Status = InvoiceStatus.Sent, Currency = "USD",
+                CreatedAt = new DateTime(2026, 10, 5, 10, 0, 0, DateTimeKind.Utc),
+                SentAt = new DateTime(2026, 10, 6, 10, 0, 0, DateTimeKind.Utc),
+                StatusChangedAt = new DateTime(2026, 10, 6, 10, 0, 0, DateTimeKind.Utc),
                 Lines = [new InvoiceLineItem { Description = "Identity design — phase 1", Quantity = 1, UnitPrice = 2400 }]
             };
             var invoiceB = new Invoice
@@ -74,6 +92,9 @@ public static class DemoData
                 ClientId = seedClientB.Id, ProjectId = projectB.Id, Number = "INV-2026-002",
                 IssueDate = new DateOnly(2026, 10, 1), DueDate = new DateOnly(2026, 10, 31),
                 Status = InvoiceStatus.Paid, Currency = "USD",
+                CreatedAt = new DateTime(2026, 10, 1, 10, 0, 0, DateTimeKind.Utc),
+                SentAt = new DateTime(2026, 10, 2, 10, 0, 0, DateTimeKind.Utc),
+                StatusChangedAt = new DateTime(2026, 11, 3, 10, 0, 0, DateTimeKind.Utc),
                 Lines = [new InvoiceLineItem { Description = "October advisory", Quantity = 8, UnitPrice = 180 }]
             };
             db.AddRange(seedClientA, seedClientB, admin, userA, userB, projectA, projectB, invoiceA, invoiceB,
@@ -175,6 +196,7 @@ public static class DemoData
                 FullName = fullName,
                 Role = role,
                 ClientId = clientId,
+                ClientRole = role == UserRole.Client ? ClientRole.Owner : ClientRole.Member,
                 PasswordHash = string.Empty,
                 IsActive = true
             };

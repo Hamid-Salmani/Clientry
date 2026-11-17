@@ -29,6 +29,7 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
+        modelBuilder.Entity<User>().Property(x => x.ClientRole).HasDefaultValue(ClientRole.Member);
         modelBuilder.Entity<Payment>().HasIndex(x => x.StripePaymentIntentId).IsUnique();
         modelBuilder.Entity<Invitation>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<RefreshToken>().HasIndex(x => x.TokenHash).IsUnique();

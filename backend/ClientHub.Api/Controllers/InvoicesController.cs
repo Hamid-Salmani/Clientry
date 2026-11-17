@@ -62,7 +62,7 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         var items = invoices.Select(invoice => new
         {
             invoice.Id, invoice.ClientId, invoice.Number, invoice.IssueDate, invoice.DueDate, status = invoice.Status.ToString(),
-            invoice.Currency, total = invoice.Total,
+            invoice.Currency, invoice.DiscountAmount, invoice.TaxAmount, total = invoice.Total,
             lines = invoice.Lines.Select(line => new { line.Description, line.Quantity, line.UnitPrice })
         }).ToArray();
         return Ok(new PagedResult<object>(items.Cast<object>().ToArray(), total, page, pageSize));
@@ -77,6 +77,59 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         if (invoice is null) return NotFound();
         var content = pdf.Generate(invoice, invoice.Client?.CompanyName ?? "Client");
         return File(content, "application/pdf", $"{invoice.Number}.pdf");
+    }
+
+    [HttpGet("{invoiceId:guid}")]
+    public async Task<IActionResult> Get(Guid invoiceId, CancellationToken cancellationToken)
+    {
+        var invoice = await db.Invoices.AsNoTracking()
+            .Include(item => item.Lines)
+            .Include(item => item.Payments)
+            .FirstOrDefaultAsync(item => item.Id == invoiceId, cancellationToken);
+        if (invoice is null) return NotFound();
+        var createdAt = invoice.CreatedAt == DateTime.MinValue
+            ? invoice.IssueDate.ToDateTime(TimeOnly.MinValue)
+            : invoice.CreatedAt;
+        var timeline = new List<object>
+        {
+            new { status = "Draft", at = createdAt }
+        };
+        var sentAt = invoice.SentAt ?? (invoice.Status == InvoiceStatus.Draft ? null : createdAt);
+        if (sentAt.HasValue)
+            timeline.Add(new { status = "Sent", at = sentAt.Value });
+        if (invoice.Status == InvoiceStatus.Paid)
+        {
+            var paidAt = invoice.Payments.Where(payment => payment.Status == "Succeeded")
+                .Select(payment => payment.PaidAt).Max();
+            timeline.Add(new { status = "Paid", at = paidAt ?? invoice.StatusChangedAt });
+        }
+        else if (invoice.Status is InvoiceStatus.Overdue or InvoiceStatus.Void)
+            timeline.Add(new { status = invoice.Status.ToString(), at = invoice.StatusChangedAt ?? sentAt ?? createdAt });
+        return Ok(new
+        {
+            invoice.Id, invoice.ClientId, invoice.Number, invoice.IssueDate, invoice.DueDate,
+            status = invoice.Status.ToString(), invoice.Currency, invoice.CreatedAt, invoice.SentAt,
+            lineSubtotal = invoice.Lines.Sum(line => line.Quantity * line.UnitPrice),
+            invoice.DiscountAmount, invoice.TaxAmount, total = invoice.Total,
+            lines = invoice.Lines.Select(line => new { line.Description, line.Quantity, line.UnitPrice }),
+            payments = invoice.Payments.OrderByDescending(payment => payment.PaidAt)
+                .Select(payment => new { payment.Amount, payment.Status, payment.PaidAt, payment.StripePaymentIntentId }),
+            statusTimeline = timeline
+        });
+    }
+
+    [HttpGet("{invoiceId:guid}/receipt.pdf")]
+    public async Task<IActionResult> Receipt(Guid invoiceId, CancellationToken cancellationToken)
+    {
+        var invoice = await db.Invoices.AsNoTracking()
+            .Include(item => item.Lines)
+            .Include(item => item.Payments)
+            .Include(item => item.Client)
+            .FirstOrDefaultAsync(item => item.Id == invoiceId && item.Status == InvoiceStatus.Paid, cancellationToken);
+        if (invoice is null) return NotFound();
+        var settings = await db.WorkspaceSettings.AsNoTracking().SingleOrDefaultAsync(item => item.Id == 1, cancellationToken);
+        var content = pdf.GenerateReceipt(invoice, settings, invoice.Client);
+        return File(content, "application/pdf", $"{invoice.Number}-receipt.pdf");
     }
 
     [HttpGet("export.csv")]
@@ -124,6 +177,8 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
             IssueDate = DateOnly.FromDateTime(DateTime.UtcNow),
             DueDate = request.DueDate,
             Currency = request.Currency.ToUpperInvariant(),
+            DiscountAmount = request.DiscountAmount,
+            TaxAmount = request.TaxAmount,
             Lines = CreateLines(request.Lines)
         };
         db.Invoices.Add(invoice);
@@ -155,6 +210,8 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         invoice.ProjectId = request.ProjectId;
         invoice.DueDate = request.DueDate;
         invoice.Currency = request.Currency.ToUpperInvariant();
+        invoice.DiscountAmount = request.DiscountAmount;
+        invoice.TaxAmount = request.TaxAmount;
         invoice.Lines = CreateLines(request.Lines);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -182,6 +239,8 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         if (!InvoiceRules.CanTransition(invoice.Status, InvoiceStatus.Sent))
             return Conflict(new { message = "This invoice cannot be sent in its current state." });
         invoice.Status = InvoiceStatus.Sent;
+        invoice.SentAt = DateTime.UtcNow;
+        invoice.StatusChangedAt = invoice.SentAt;
         await AddInvoiceNotificationsAsync(invoice.ClientId, $"Invoice {invoice.Number} is ready for payment.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -200,6 +259,9 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
             return Conflict(new { message = $"An invoice cannot move from {invoice.Status} to {nextStatus}." });
         if (invoice.Status == nextStatus) return NoContent();
         invoice.Status = nextStatus;
+        invoice.StatusChangedAt = DateTime.UtcNow;
+        if (nextStatus == InvoiceStatus.Sent)
+            invoice.SentAt = invoice.StatusChangedAt;
         if (nextStatus == InvoiceStatus.Overdue)
             await AddInvoiceNotificationsAsync(invoice.ClientId, $"Invoice {invoice.Number} is overdue.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -231,7 +293,9 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         request.Lines is { Count: > 0 and <= 50 } &&
         request.Lines.All(x => x is not null && !string.IsNullOrWhiteSpace(x.Description) && x.Description.Length <= 240 &&
             x.Quantity > 0 && x.Quantity <= 1_000_000 && x.UnitPrice >= 0 && x.UnitPrice <= 1_000_000_000) &&
-        !string.IsNullOrWhiteSpace(request.Currency) && request.Currency.Length == 3;
+        !string.IsNullOrWhiteSpace(request.Currency) && request.Currency.Length == 3 &&
+        request.DiscountAmount >= 0 && request.TaxAmount is >= 0 and <= 1_000_000_000 &&
+        request.DiscountAmount <= request.Lines.Sum(line => line.Quantity * line.UnitPrice);
 
     private static List<DomainInvoiceLineItem> CreateLines(IEnumerable<InvoiceLineRequest> lines) =>
         lines.Select(x => new DomainInvoiceLineItem
@@ -263,7 +327,9 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
             db.Notifications.Add(new Notification { UserId = recipientId, Type = "Invoice reminder", Message = message });
     }
 
-    public sealed record CreateInvoiceRequest(Guid ClientId, Guid? ProjectId, DateOnly DueDate, string Currency, List<InvoiceLineRequest> Lines);
+    public sealed record CreateInvoiceRequest(
+        Guid ClientId, Guid? ProjectId, DateOnly DueDate, string Currency, List<InvoiceLineRequest> Lines,
+        decimal DiscountAmount = 0, decimal TaxAmount = 0);
     public sealed record UpdateInvoiceStatusRequest(string Status);
     public sealed record InvoiceLineRequest(string Description, decimal Quantity, decimal UnitPrice);
 }

@@ -54,6 +54,12 @@ namespace ClientHub.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BillingAddress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BillingEmails")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CompanyName")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -61,8 +67,14 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("LegalName")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Notes")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaxId")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -148,8 +160,14 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<Guid>("ClientId")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Currency")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("DiscountAmount")
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly>("DueDate")
@@ -165,8 +183,17 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("StatusChangedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TaxAmount")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -538,6 +565,11 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.Property<Guid?>("ClientId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("ClientRole")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
 
                     b.Property<string>("Email")
                         .IsRequired()
