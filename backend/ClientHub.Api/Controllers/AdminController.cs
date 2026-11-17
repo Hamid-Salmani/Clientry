@@ -215,9 +215,24 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
             lifetimeRevenue,
             users = client.Users.OrderBy(user => user.FullName).Select(user => new
             {
-                user.Id, user.FullName, user.Email, user.IsActive
+                user.Id, user.FullName, user.Email, user.IsActive, clientRole = user.ClientRole.ToString()
             })
         });
+    }
+
+    [HttpPut("clients/{clientId:guid}/owner")]
+    public async Task<IActionResult> SetClientOwner(Guid clientId, ClientOwnerRequest request, CancellationToken cancellationToken)
+    {
+        if (!await db.Clients.AnyAsync(client => client.Id == clientId, cancellationToken)) return NotFound();
+        var users = await db.Users.Where(user => user.ClientId == clientId && user.Role == UserRole.Client)
+            .ToListAsync(cancellationToken);
+        var owner = users.SingleOrDefault(user => user.Id == request.UserId && user.IsActive);
+        if (owner is null) return NotFound();
+
+        foreach (var user in users)
+            user.ClientRole = user.Id == owner.Id ? ClientRole.Owner : ClientRole.Member;
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
     }
 
     [HttpPut("clients/{clientId:guid}")]
@@ -258,6 +273,8 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
         var user = await db.Users.SingleOrDefaultAsync(x =>
             x.Id == userId && x.ClientId == clientId && x.Role == UserRole.Client, cancellationToken);
         if (user is null) return NotFound();
+        if (!request.IsActive && user.ClientRole == ClientRole.Owner)
+            return Conflict(new { message = "Assign another owner before deactivating the current owner." });
         user.IsActive = request.IsActive;
         if (!user.IsActive)
         {
@@ -339,6 +356,7 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
     }
 
     public sealed record ClientRequest(string CompanyName, string Notes);
+    public sealed record ClientOwnerRequest(Guid UserId);
     public sealed record SetActiveRequest(bool IsActive);
     public sealed record InvitationRequest(string Email, string FullName);
     public sealed record WorkspaceSettingsRequest(string Name, string SupportEmail);

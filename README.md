@@ -8,6 +8,7 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - SQLite persistence with EF Core migrations and demo seed data, JWT authentication, role checks, login throttling/lockout, tenant query filters, and resource-scoped file, invoice, project, and comment endpoints.
 - Project milestones and progress, comments with SignalR project groups, restricted local file uploads/downloads, generated invoice PDFs, and Stripe PaymentIntent/webhook handling.
 - Administrator client lifecycle management: search/paged client list, create/update, activation, client details, user status controls, and per-client invitations.
+- Client owners can invite colleagues and deactivate members inside their own client workspace; client members can view the team but cannot manage access or billing. Administrators can view member roles and reassign the owner.
 - Project administration: searchable, filterable, sortable paged project lists; project edits and status/archive transitions; milestone CRUD, completion, ordering, and per-project activity history.
 - Project files can be uploaded, downloaded, renamed, and removed by their uploader or an administrator; project comments can be edited or removed by their author or an administrator, with activity and SignalR updates.
 - Invoice administration supports draft creation/editing/deletion, valid status transitions, verified-payment-only completion, PDF downloads, and CSV export.
@@ -54,6 +55,8 @@ All demo accounts use `DemoPass!234`:
 | Agency admin | `admin@demo.com` |
 | Client A | `clientA@demo.com` |
 | Client B | `clientB@demo.com` |
+| Client A member | `clienta.member@demo.com` |
+| Client B member | `clientb.member@demo.com` |
 
 Seed data includes two independent client organizations, projects, milestones, comments, and invoices.
 
@@ -108,6 +111,7 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 - The client home overview uses the authenticated user's previous overview visit; for a first visit it treats the prior seven days as the activity window, then persists the current visit timestamp.
 - Project file archives are limited to 50 MB of uncompressed content. Only PNG, JPEG, and PDF previews are served inline with `nosniff`; other file types remain downloads.
 - Invoice discount and tax values are fixed currency amounts entered by the agency; the supported invoice currency remains USD. Billing email addresses are separated by commas or semicolons and limited to five addresses.
+- The first client user is Owner; subsequent invited users are Members. Owners can invite and deactivate Members but cannot deactivate themselves or another Owner. Administrator reassignment promotes one active user and demotes the prior owner to Member.
 
 ## Current limitations
 

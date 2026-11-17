@@ -586,8 +586,14 @@ public sealed class DomainAndIsolationTests
                     hasher.VerifyHashedPassword(user, user.PasswordHash, "DemoPass!234"));
                 Assert.Equal(0, user.FailedLoginAttempts);
                 Assert.Null(user.LockedUntil);
+                Assert.Equal(ClientRole.Owner, user.ClientRole);
+                Assert.NotNull(user.ClientId);
             }
 
+            Assert.Equal(ClientRole.Member, users["clienta.member@demo.com"].ClientRole);
+            Assert.Equal(ClientRole.Member, users["clientb.member@demo.com"].ClientRole);
+            Assert.Equal(users["clienta@demo.com"].ClientId, users["clienta.member@demo.com"].ClientId);
+            Assert.Equal(users["clientb@demo.com"].ClientId, users["clientb.member@demo.com"].ClientId);
             Assert.Equal(unrelatedHash, users["other@example.com"].PasswordHash);
         }
     }
@@ -851,6 +857,77 @@ public sealed class DomainAndIsolationTests
         var saved = await db.WorkspaceSettings.SingleAsync();
         Assert.Equal("North Studio", saved.Name);
         Assert.Equal("support@example.com", saved.SupportEmail);
+    }
+
+    [Fact]
+    public async Task ClientTeamIsOwnerManagedAndAdminCanReassignTheOwner()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Team Client", Notes = "" };
+        var otherClient = new Client { CompanyName = "Other Client", Notes = "" };
+        var owner = new User
+        {
+            Email = "owner@example.test", FullName = "Workspace Owner", Role = UserRole.Client,
+            ClientRole = ClientRole.Owner, ClientId = client.Id, PasswordHash = ""
+        };
+        var member = new User
+        {
+            Email = "member@example.test", FullName = "Workspace Member", Role = UserRole.Client,
+            ClientRole = ClientRole.Member, ClientId = client.Id, PasswordHash = ""
+        };
+        var outsider = new User
+        {
+            Email = "outsider@example.test", FullName = "Other Member", Role = UserRole.Client,
+            ClientRole = ClientRole.Member, ClientId = otherClient.Id, PasswordHash = ""
+        };
+        var admin = new User { Email = "admin@example.test", FullName = "Admin", Role = UserRole.Admin, PasswordHash = "" };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using (var seed = new ClientHubDbContext(options, new TestScope(null, null, false)))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.AddRange(client, otherClient, owner, member, outsider, admin);
+            await seed.SaveChangesAsync();
+        }
+
+        var emails = new CapturingEmailSender();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Frontend:BaseUrl"] = "https://portal.example.test"
+        }).Build();
+        await using (var ownerDb = new ClientHubDbContext(options, new TestScope(client.Id, owner.Id, true)))
+        {
+            var controller = new ClientTeamController(ownerDb, emails, configuration);
+            SetAuthenticatedUser(controller, owner.Id, UserRole.Client, client.Id);
+            Assert.IsType<ConflictObjectResult>(await controller.Invite(
+                new ClientTeamController.InvitationRequest(outsider.Email, "Other Member"), CancellationToken.None));
+            var invitationResult = Assert.IsType<CreatedAtActionResult>(await controller.Invite(
+                new ClientTeamController.InvitationRequest("new.person@example.test", "New Person"), CancellationToken.None));
+            Assert.NotNull(invitationResult.Value);
+            Assert.Single(emails.Messages);
+            Assert.Equal(client.Id, (await ownerDb.Invitations.SingleAsync()).ClientId);
+            Assert.IsType<NotFoundResult>(await controller.Deactivate(outsider.Id, CancellationToken.None));
+        }
+
+        await using (var memberDb = new ClientHubDbContext(options, new TestScope(client.Id, member.Id, true)))
+        {
+            var controller = new ClientTeamController(memberDb, emails, configuration);
+            SetAuthenticatedUser(controller, member.Id, UserRole.Client, client.Id);
+            Assert.IsType<ForbidResult>(await controller.List(CancellationToken.None));
+            Assert.IsType<ForbidResult>(await controller.Invite(
+                new ClientTeamController.InvitationRequest("blocked@example.test", "Blocked User"), CancellationToken.None));
+            Assert.IsType<ForbidResult>(await controller.Deactivate(member.Id, CancellationToken.None));
+        }
+
+        await using (var adminDb = new ClientHubDbContext(options, new TestScope(null, admin.Id, false)))
+        {
+            var controller = new AdminController(adminDb, emails, configuration);
+            SetAuthenticatedUser(controller, admin.Id, UserRole.Admin);
+            Assert.IsType<NoContentResult>(await controller.SetClientOwner(client.Id,
+                new AdminController.ClientOwnerRequest(member.Id), CancellationToken.None));
+            Assert.Equal(ClientRole.Member, (await adminDb.Users.SingleAsync(user => user.Id == owner.Id)).ClientRole);
+            Assert.Equal(ClientRole.Owner, (await adminDb.Users.SingleAsync(user => user.Id == member.Id)).ClientRole);
+        }
     }
 
     private static void SetAuthenticatedUser(ControllerBase controller, Guid userId, UserRole? role = null, Guid? clientId = null)

@@ -19,7 +19,11 @@ public static class DemoData
         await db.Database.MigrateAsync();
 
         var hasher = new PasswordHasher<User>();
-        var demoEmails = new[] { "admin@demo.com", "clienta@demo.com", "clientb@demo.com" };
+        var demoEmails = new[]
+        {
+            "admin@demo.com", "clienta@demo.com", "clientb@demo.com",
+            "clienta.member@demo.com", "clientb.member@demo.com"
+        };
         var demoUsers = await db.Users
             .Where(user => demoEmails.Contains(user.Email.ToLower()))
             .ToListAsync();
@@ -31,7 +35,9 @@ public static class DemoData
             user.FailedLoginAttempts = 0;
             user.LockedUntil = null;
             user.IsActive = true;
-            user.ClientRole = user.Role == UserRole.Client ? ClientRole.Owner : ClientRole.Member;
+            user.ClientRole = user.Email.ToLowerInvariant() is "clienta@demo.com" or "clientb@demo.com"
+                ? ClientRole.Owner
+                : ClientRole.Member;
         }
 
         if (!await db.Users.AnyAsync())
@@ -63,6 +69,10 @@ public static class DemoData
             var admin = NewUser("admin@demo.com", "Alex Morgan", UserRole.Admin, null);
             var userA = NewUser("clienta@demo.com", "Mia Chen", UserRole.Client, seedClientA.Id);
             var userB = NewUser("clientb@demo.com", "Noah Patel", UserRole.Client, seedClientB.Id);
+            var userAMember = NewUser("clienta.member@demo.com", "Jordan Lee", UserRole.Client, seedClientA.Id);
+            var userBMember = NewUser("clientb.member@demo.com", "Taylor Kim", UserRole.Client, seedClientB.Id);
+            userA.ClientRole = ClientRole.Owner;
+            userB.ClientRole = ClientRole.Owner;
             var projectA = new Project
             {
                 ClientId = seedClientA.Id, Name = "Brand identity refresh",
@@ -97,7 +107,7 @@ public static class DemoData
                 StatusChangedAt = new DateTime(2026, 11, 3, 10, 0, 0, DateTimeKind.Utc),
                 Lines = [new InvoiceLineItem { Description = "October advisory", Quantity = 8, UnitPrice = 180 }]
             };
-            db.AddRange(seedClientA, seedClientB, admin, userA, userB, projectA, projectB, invoiceA, invoiceB,
+            db.AddRange(seedClientA, seedClientB, admin, userA, userB, userAMember, userBMember, projectA, projectB, invoiceA, invoiceB,
                 new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Discovery & strategy", Order = 1, IsCompleted = true },
                 new Milestone
                 {
@@ -174,12 +184,6 @@ public static class DemoData
             .Where(email => !demoUsers.Any(user => string.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
-        if (missingDemoEmails.Length == 0)
-        {
-            await db.SaveChangesAsync();
-            return;
-        }
-
         var clientA = await db.Clients.FirstOrDefaultAsync(client => client.CompanyName == "Northstar Studio") ?? new Client { CompanyName = "Northstar Studio", Notes = "Brand and digital design partner" };
         var clientB = await db.Clients.FirstOrDefaultAsync(client => client.CompanyName == "Juniper & Co.") ?? new Client { CompanyName = "Juniper & Co.", Notes = "Advisory client" };
 
@@ -187,6 +191,15 @@ public static class DemoData
             db.Clients.Add(clientA);
         if (!db.Clients.Any(client => client.Id == clientB.Id))
             db.Clients.Add(clientB);
+
+        foreach (var user in demoUsers.Where(user => user.Role == UserRole.Client))
+        {
+            var email = user.Email.ToLowerInvariant();
+            if (email is "clienta@demo.com" or "clienta.member@demo.com")
+                user.ClientId = clientA.Id;
+            else if (email is "clientb@demo.com" or "clientb.member@demo.com")
+                user.ClientId = clientB.Id;
+        }
 
         User CreateMissingUser(string email, string fullName, UserRole role, Guid? clientId)
         {
@@ -196,7 +209,9 @@ public static class DemoData
                 FullName = fullName,
                 Role = role,
                 ClientId = clientId,
-                ClientRole = role == UserRole.Client ? ClientRole.Owner : ClientRole.Member,
+                ClientRole = email.ToLowerInvariant() is "clienta@demo.com" or "clientb@demo.com"
+                    ? ClientRole.Owner
+                    : ClientRole.Member,
                 PasswordHash = string.Empty,
                 IsActive = true
             };
@@ -211,6 +226,10 @@ public static class DemoData
             CreateMissingUser("clienta@demo.com", "Mia Chen", UserRole.Client, clientA.Id);
         if (missingDemoEmails.Contains("clientb@demo.com", StringComparer.OrdinalIgnoreCase))
             CreateMissingUser("clientb@demo.com", "Noah Patel", UserRole.Client, clientB.Id);
+        if (missingDemoEmails.Contains("clienta.member@demo.com", StringComparer.OrdinalIgnoreCase))
+            CreateMissingUser("clienta.member@demo.com", "Jordan Lee", UserRole.Client, clientA.Id);
+        if (missingDemoEmails.Contains("clientb.member@demo.com", StringComparer.OrdinalIgnoreCase))
+            CreateMissingUser("clientb.member@demo.com", "Taylor Kim", UserRole.Client, clientB.Id);
 
         await db.SaveChangesAsync();
     }

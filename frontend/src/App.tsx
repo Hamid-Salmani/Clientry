@@ -8,7 +8,7 @@ import { loadStripe } from '@stripe/stripe-js'
 import './App.css'
 
 const AdminCharts = lazy(() => import('./AdminCharts'))
-type User = { id?: string; name: string; role: 'Admin' | 'Client'; workspaceName?: string; supportEmail?: string }
+type User = { id?: string; name: string; role: 'Admin' | 'Client'; clientRole?: 'Owner' | 'Member'; workspaceName?: string; supportEmail?: string }
 type Project = {
   id: string
   name: string
@@ -54,7 +54,7 @@ type ClientSummary = { id: string; companyName: string; contact?: string; active
 type ClientDetails = {
   id: string; companyName: string; notes: string; isActive: boolean; projectCount: number
   outstandingBalance: number; lifetimeRevenue: number
-  users: { id: string; fullName: string; email: string; isActive: boolean }[]
+  users: { id: string; fullName: string; email: string; isActive: boolean; clientRole: 'Owner' | 'Member' }[]
 }
 type Metrics = {
   activeProjects: number
@@ -155,7 +155,8 @@ function App() {
   const queryClient = useQueryClient()
   const location = useLocation()
   const projectRouteId = location.pathname.match(/^\/projects\/([0-9a-f-]+)$/i)?.[1]
-  const activePage = location.pathname.startsWith('/clients') ? 'Clients'
+  const activePage = location.pathname.startsWith('/team') ? (user?.clientRole === 'Owner' ? 'Team' : 'Overview')
+    : location.pathname.startsWith('/clients') ? 'Clients'
     : location.pathname.startsWith('/approvals') ? 'Approvals'
     : location.pathname.startsWith('/requests') ? 'Requests'
     : location.pathname.startsWith('/projects') ? 'Projects'
@@ -210,7 +211,7 @@ function App() {
 
   const profileQuery = useQuery({
     queryKey: ['profile', token],
-    queryFn: () => request<{ id: string; name: string; role: User['role']; workspaceName: string; supportEmail: string }>('/auth/me', token),
+    queryFn: () => request<{ id: string; name: string; role: User['role']; clientRole?: User['clientRole']; workspaceName: string; supportEmail: string }>('/auth/me', token),
     enabled: Boolean(token),
   })
   const workspaceQuery = useQuery({
@@ -265,6 +266,7 @@ function App() {
     if (!profileQuery.data) return
     setUser({
       id: profileQuery.data.id, name: profileQuery.data.name, role: profileQuery.data.role,
+      clientRole: profileQuery.data.clientRole,
       workspaceName: profileQuery.data.workspaceName, supportEmail: profileQuery.data.supportEmail,
     })
   }, [profileQuery.data])
@@ -511,6 +513,9 @@ function App() {
     const timeOfDay = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
     return `${timeOfDay}, ${user?.name.split(' ')[0] ?? 'there'}`
   }, [user])
+  const navigationItems = admin
+    ? ['Overview', 'Projects', 'Invoices', 'Clients', 'Requests']
+    : ['Overview', 'Projects', 'Approvals', 'Requests', 'Invoices', ...(user?.clientRole === 'Owner' ? ['Team'] : [])]
   if (!token || !user) return <Login
     email={email}
     setEmail={setEmail}
@@ -544,7 +549,7 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          {(admin ? ['Overview', 'Projects', 'Invoices', 'Clients', 'Requests'] : ['Overview', 'Projects', 'Approvals', 'Requests', 'Invoices']).map((item) => (
+          {navigationItems.map((item) => (
             <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} aria-current={activePage === item ? 'page' : undefined} onClick={() => navigateTo(item)}>
               <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Approvals' ? 'check' : item === 'Invoices' ? 'file' : item === 'Requests' ? 'upload' : 'users'} />{item}
               {item === 'Invoices' && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <span className="nav-count">{invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').length}</span>}
@@ -598,6 +603,8 @@ function App() {
             }} />
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} admin={Boolean(admin)} clients={clients} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
+          ) : activePage === 'Team' ? (
+            <ClientTeam token={token} />
           ) : activePage === 'Settings' ? (
             <Settings key={`${workspaceSettings.name}:${workspaceSettings.supportEmail}`} workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
           ) : activePage === 'Account' ? (
@@ -737,7 +744,7 @@ function Account({ user, workspaceName, admin, onBilling, onSignOut }: {
     <section className="panel account-panel">
       <div className="account-identity"><span className="account-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><div><h2>{user.name}</h2><p>{user.role}</p></div></div>
       <div className="account-detail"><span>Account name</span><strong>{user.name}</strong></div>
-      <div className="account-detail"><span>Role</span><strong>{user.role === 'Admin' ? 'Agency admin' : 'Client'}</strong></div>
+      <div className="account-detail"><span>Role</span><strong>{user.role === 'Admin' ? 'Agency admin' : `Client ${user.clientRole ?? 'Member'}`}</strong></div>
       <div className="account-detail"><span>Workspace</span><strong>{workspaceName}</strong></div>
       {!admin && <button className="cancel-button account-signout" onClick={onBilling}>Billing details <Icon name="arrow" /></button>}
       <button className="cancel-button account-signout" onClick={onSignOut}><Icon name="logout" /> Sign out</button>
@@ -792,6 +799,74 @@ function ClientBilling({ token }: { token: string }) {
         {!billingQuery.data?.canEdit && <p className="request-file-hint">Only the client owner can change billing details.</p>}
         {billingQuery.data?.canEdit && <div className="request-form-actions"><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save billing details'}</button></div>}
       </form>}
+  </div>
+}
+
+function ClientTeam({ token }: { token: string }) {
+  const queryClient = useQueryClient()
+  const teamQuery = useQuery({
+    queryKey: ['client-team', token],
+    queryFn: () => request<{
+      members: { id: string; fullName: string; email: string; isActive: boolean; clientRole: 'Owner' | 'Member' }[]
+      invitations: { id: string; fullName: string; email: string; expiresAt: string }[]
+    }>('/me/team', token),
+    enabled: Boolean(token),
+  })
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  async function invite(event: FormEvent) {
+    event.preventDefault()
+    setBusy('invite'); setError(''); setNotice('')
+    try {
+      await request('/me/team/invitations', token, { method: 'POST', body: JSON.stringify({ fullName, email }) })
+      setFullName(''); setEmail('')
+      setNotice('Invitation sent. The invitee will receive an email with a secure sign-up link.')
+      await queryClient.invalidateQueries({ queryKey: ['client-team', token] })
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to send the invitation.') }
+    finally { setBusy('') }
+  }
+
+  async function deactivate(member: { id: string; fullName: string }) {
+    if (!window.confirm(`Deactivate ${member.fullName}? They will be signed out and lose access to this workspace.`)) return
+    setBusy(member.id); setError(''); setNotice('')
+    try {
+      await request(`/me/team/${member.id}/deactivate`, token, { method: 'PATCH' })
+      await queryClient.invalidateQueries({ queryKey: ['client-team', token] })
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to deactivate this member.') }
+    finally { setBusy('') }
+  }
+
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">CLIENT WORKSPACE</div><h1>Team<span className="heading-period">.</span></h1><p>Invite colleagues and manage access to your shared workspace.</p></div></div>
+    {error && <div className="alert" role="alert">{error}</div>}
+    {notice && <p className="billing-saved" role="status">{notice}</p>}
+    {teamQuery.isError && <div className="alert" role="alert">{teamQuery.error instanceof Error ? teamQuery.error.message : 'Unable to load your team.'}</div>}
+    <div className="team-layout">
+      <form className="panel request-form team-invite-form" onSubmit={(event) => void invite(event)}>
+        <div className="panel-heading"><div><h2>Invite a colleague</h2><p>They’ll join as a team member and can collaborate on projects.</p></div></div>
+        <label>Full name<input value={fullName} onChange={(event) => setFullName(event.target.value)} maxLength={120} required /></label>
+        <label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={254} required /></label>
+        <button className="primary-button" disabled={Boolean(busy)}>{busy === 'invite' ? 'Sending invitation…' : 'Send invitation'}</button>
+      </form>
+      <section className="panel full-panel team-members-panel">
+        <div className="panel-heading"><div><h2>Team members</h2><p>Only workspace owners can invite or deactivate members.</p></div></div>
+        {teamQuery.isLoading ? <div className="loading-bar" role="status" aria-label="Loading team members" /> :
+          teamQuery.data?.members.length ? <div className="client-user-list">{teamQuery.data.members.map((member) => <div className="client-user-row" key={member.id}>
+            <span><b>{member.fullName}</b><small>{member.email} · {member.isActive ? 'Active' : 'Inactive'} · {member.clientRole}</small></span>
+            {member.clientRole === 'Member' && member.isActive && <button className="cancel-button" onClick={() => void deactivate(member)} disabled={Boolean(busy)}>{busy === member.id ? 'Deactivating…' : 'Deactivate'}</button>}
+          </div>)}</div> : <EmptyState title="No team members yet" text="Invite a colleague to collaborate in this workspace." />}
+      </section>
+    </div>
+    {Boolean(teamQuery.data?.invitations.length) && <section className="panel full-panel team-members-panel">
+      <div className="panel-heading"><div><h2>Pending invitations</h2><p>Invitations expire seven days after they’re sent.</p></div></div>
+      <div className="client-user-list">{teamQuery.data?.invitations.map((invitation) => <div className="client-user-row" key={invitation.id}>
+        <span><b>{invitation.fullName}</b><small>{invitation.email} · Expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></span>
+      </div>)}</div>
+    </section>}
   </div>
 }
 
@@ -1422,6 +1497,19 @@ function Clients({ clients, token, onChanged }: { clients: ClientSummary[]; toke
     finally { setBusy('') }
   }
 
+  async function setClientOwner(user: ClientDetails['users'][number]) {
+    if (!details) return
+    setBusy(user.id); setError('')
+    try {
+      await request(`/admin/clients/${details.id}/owner`, token, {
+        method: 'PUT', body: JSON.stringify({ userId: user.id }),
+      })
+      const refreshed = await request<ClientDetails>(`/admin/clients/${details.id}`, token)
+      setDetails(refreshed)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to change the client owner.') }
+    finally { setBusy('') }
+  }
+
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">RELATIONSHIPS</div><h1>Clients<span className="heading-period">.</span></h1><p>Good work starts with good relationships.</p></div><button className="primary-button" onClick={() => setNewClientOpen((open) => !open)}>＋ New client</button></div>
     {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
@@ -1450,7 +1538,8 @@ function Clients({ clients, token, onChanged }: { clients: ClientSummary[]; toke
               <button className="primary-button" disabled={busy === details.id}>{busy === details.id ? 'Saving...' : 'Save client'}</button>
             </form>
             <div className="client-user-list"><strong>Client users</strong>{details.users.length ? details.users.map((user) => <div className="client-user-row" key={user.id}>
-              <span><b>{user.fullName}</b><small>{user.email} · {user.isActive ? 'Active' : 'Inactive'}</small></span>
+              <span><b>{user.fullName}</b><small>{user.email} · {user.isActive ? 'Active' : 'Inactive'} · {user.clientRole}</small></span>
+              {user.clientRole !== 'Owner' && user.isActive && <button className="text-button" onClick={() => void setClientOwner(user)} disabled={busy === user.id}>{busy === user.id ? 'Saving…' : 'Make owner'}</button>}
               <button className="cancel-button" onClick={() => void toggleClientUser(user)} disabled={busy === user.id}>{user.isActive ? 'Deactivate' : 'Activate'}</button>
             </div>) : <p className="popover-hint">No client users yet.</p>}</div>
           </>}

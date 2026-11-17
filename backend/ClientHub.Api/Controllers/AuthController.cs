@@ -299,6 +299,7 @@ public sealed class AuthController(
     [Authorize]
     public async Task<IActionResult> Me(CancellationToken cancellationToken)
     {
+        var user = await GetCurrentUserAsync(cancellationToken);
         var clientId = Guid.TryParse(User.FindFirstValue("client_id"), out var parsedClientId)
             ? parsedClientId
             : (Guid?)null;
@@ -311,6 +312,7 @@ public sealed class AuthController(
             id = User.FindFirstValue(ClaimTypes.NameIdentifier),
             name = User.Identity?.Name,
             role = User.FindFirstValue(ClaimTypes.Role),
+            clientRole = user?.ClientRole.ToString(),
             workspaceName = clientName ?? "Client workspace",
             supportEmail = settings?.SupportEmail ?? "support@studionorth.example"
         });
