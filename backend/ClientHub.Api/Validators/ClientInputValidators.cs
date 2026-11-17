@@ -30,7 +30,7 @@ public sealed class ClientTeamInvitationValidator : AbstractValidator<ClientTeam
 {
     public ClientTeamInvitationValidator()
     {
-        RuleFor(request => request.FullName).NotEmpty().MaximumLength(120);
+        RuleFor(request => request.FullName).Must(value => !string.IsNullOrWhiteSpace(value)).MaximumLength(120);
         RuleFor(request => request.Email).NotEmpty().MaximumLength(254).Must(IsValidEmail)
             .WithMessage("Enter a valid email address.");
     }
@@ -60,7 +60,7 @@ public sealed class ProjectCommentValidator : AbstractValidator<ProjectsControll
 {
     public ProjectCommentValidator()
     {
-        RuleFor(request => request.Body).NotEmpty().MaximumLength(5000);
+        RuleFor(request => request.Body).Must(value => !string.IsNullOrWhiteSpace(value)).MaximumLength(5000);
     }
 }
 
@@ -82,8 +82,8 @@ public sealed class RegisterValidator : AbstractValidator<AuthController.Registe
     public RegisterValidator()
     {
         RuleFor(request => request.Email).NotEmpty().MaximumLength(254).EmailAddress();
-        RuleFor(request => request.Password).NotEmpty().MinimumLength(8);
-        RuleFor(request => request.FullName).NotEmpty().MaximumLength(120);
+        RuleFor(request => request.Password).Must(value => !string.IsNullOrWhiteSpace(value)).MinimumLength(8);
+        RuleFor(request => request.FullName).Must(value => !string.IsNullOrWhiteSpace(value)).MaximumLength(120);
     }
 }
 
@@ -91,8 +91,8 @@ public sealed class ChangePasswordValidator : AbstractValidator<AuthController.C
 {
     public ChangePasswordValidator()
     {
-        RuleFor(request => request.CurrentPassword).NotEmpty();
-        RuleFor(request => request.NewPassword).NotEmpty().MinimumLength(8);
+        RuleFor(request => request.CurrentPassword).Must(value => !string.IsNullOrWhiteSpace(value));
+        RuleFor(request => request.NewPassword).Must(value => !string.IsNullOrWhiteSpace(value)).MinimumLength(8);
     }
 }
 
@@ -100,6 +100,6 @@ public sealed class UpdateProfileValidator : AbstractValidator<AuthController.Up
 {
     public UpdateProfileValidator()
     {
-        RuleFor(request => request.FullName).NotEmpty().MaximumLength(120);
+        RuleFor(request => request.FullName).Must(value => !string.IsNullOrWhiteSpace(value)).MaximumLength(120);
     }
 }

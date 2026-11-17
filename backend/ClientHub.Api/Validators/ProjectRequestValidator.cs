@@ -7,8 +7,8 @@ public sealed class ProjectRequestValidator : AbstractValidator<ProjectRequestsC
 {
     public ProjectRequestValidator()
     {
-        RuleFor(request => request.Title).NotEmpty().MaximumLength(160);
-        RuleFor(request => request.Description).NotEmpty().MaximumLength(4000);
+        RuleFor(request => request.Title).Must(value => !string.IsNullOrWhiteSpace(value)).MaximumLength(160);
+        RuleFor(request => request.Description).Must(value => !string.IsNullOrWhiteSpace(value)).MaximumLength(4000);
         RuleFor(request => request.Priority).Must(value =>
             Enum.TryParse<ClientHub.Domain.ProjectRequestPriority>(value, true, out var parsed) &&
             Enum.IsDefined(parsed));

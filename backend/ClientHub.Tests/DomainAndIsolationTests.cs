@@ -854,6 +854,22 @@ public sealed class DomainAndIsolationTests
     }
 
     [Fact]
+    public async Task ClientInputValidatorsRejectWhitespaceAndMalformedValues()
+    {
+        var projectRequest = await new ProjectRequestValidator().ValidateAsync(
+            new ProjectRequestsController.CreateRequest("  ", "Description", "Normal"));
+        Assert.False(projectRequest.IsValid);
+
+        var account = await new RegisterValidator().ValidateAsync(
+            new AuthController.RegisterRequest("not-an-email", "        ", "  "));
+        Assert.False(account.IsValid);
+
+        var teamInvite = await new ClientTeamInvitationValidator().ValidateAsync(
+            new ClientTeamController.InvitationRequest("person@example.test", "  "));
+        Assert.False(teamInvite.IsValid);
+    }
+
+    [Fact]
     public async Task LogoutAllRevokesEveryRefreshTokenForTheCurrentUser()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
