@@ -449,12 +449,12 @@ function App() {
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">c</div><span>clientry</span></div>
         <div className="workspace-container" ref={workspaceRef}>
-          <button className={`workspace-switch ${openPopover === 'workspace' ? 'open' : ''}`} aria-expanded={openPopover === 'workspace'} onClick={() => setOpenPopover(openPopover === 'workspace' ? null : 'workspace')}>
+          <button className={`workspace-switch ${openPopover === 'workspace' ? 'open' : ''}`} aria-expanded={openPopover === 'workspace'} aria-controls="workspace-popover" onClick={() => setOpenPopover(openPopover === 'workspace' ? null : 'workspace')}>
             <span className="workspace-avatar"><Icon name="building" /></span>
             <span className="workspace-meta"><strong>{workspaceName}</strong><span>{admin ? 'Agency workspace' : 'Client workspace'}</span></span>
             <Icon name="chevron" />
           </button>
-          {openPopover === 'workspace' && <div className="popover workspace-popover">
+          {openPopover === 'workspace' && <div className="popover workspace-popover" id="workspace-popover">
             <div className="popover-heading"><span className="popover-icon"><Icon name="building" /></span><div><strong>{workspaceName}</strong><span>Current workspace</span></div></div>
             <p>{admin ? 'Manage your studio and client relationships.' : 'Your projects, files, and invoices in one place.'}</p>
             {admin && <button className="popover-link" onClick={() => navigateTo('Clients')}>View clients <Icon name="arrow" /></button>}
@@ -464,14 +464,14 @@ function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace navigation">
           {(admin ? ['Overview', 'Projects', 'Invoices', 'Clients'] : ['Overview', 'Projects', 'Invoices']).map((item) => (
-            <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} onClick={() => navigateTo(item)}>
+            <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} aria-current={activePage === item ? 'page' : undefined} onClick={() => navigateTo(item)}>
               <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Invoices' ? 'file' : 'users'} />{item}
               {item === 'Invoices' && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <span className="nav-count">{invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').length}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className={`nav-item muted ${activePage === 'Settings' ? 'active' : ''}`} onClick={() => navigateTo('Settings')}><Icon name="settings" />Settings</button>
+          <button className={`nav-item muted ${activePage === 'Settings' ? 'active' : ''}`} aria-current={activePage === 'Settings' ? 'page' : undefined} onClick={() => navigateTo('Settings')}><Icon name="settings" />Settings</button>
           <div className="profile">
             <button className="profile-account" onClick={() => navigateTo('Account')} aria-label={`Open ${user.name}'s account`}>
               <span className="profile-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span>
@@ -486,11 +486,11 @@ function App() {
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-separator">/</span><strong>{selectedProject?.name ?? activePage}</strong></div>
           <div className="topbar-actions" ref={actionsRef}>
-            <button className="icon-button search-button" aria-label="Search workspace" aria-expanded={openPopover === 'search'} onClick={() => { setSearchTerm(''); setOpenPopover(openPopover === 'search' ? null : 'search') }}><Icon name="search" /></button>
-            <button className="icon-button notification-button" aria-label="Notifications" aria-expanded={openPopover === 'notifications'} onClick={() => { const opening = openPopover !== 'notifications'; setOpenPopover(opening ? 'notifications' : null); if (opening) void loadNotifications() }}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
+            <button className="icon-button search-button" aria-label="Search workspace" aria-expanded={openPopover === 'search'} aria-controls="workspace-search-popover" onClick={() => { setSearchTerm(''); setOpenPopover(openPopover === 'search' ? null : 'search') }}><Icon name="search" /></button>
+            <button className="icon-button notification-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ''}`} aria-expanded={openPopover === 'notifications'} aria-controls="workspace-notifications-popover" onClick={() => { const opening = openPopover !== 'notifications'; setOpenPopover(opening ? 'notifications' : null); if (opening) void loadNotifications() }}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
             <div className="topbar-divider" />
             <button className="topbar-avatar" aria-label={`Open ${user.name}'s account`} onClick={() => navigateTo('Account')}>{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</button>
-            {openPopover === 'search' && <div className="popover search-popover" role="dialog" aria-label="Search workspace">
+            {openPopover === 'search' && <div className="popover search-popover" id="workspace-search-popover" role="dialog" aria-label="Search workspace">
               <label className="search-field"><Icon name="search" /><input ref={searchInputRef} value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setOpenPopover(null) }} placeholder="Search projects, invoices, clients..." /><button className="icon-button" onClick={() => setOpenPopover(null)} aria-label="Close search"><Icon name="close" /></button></label>
               <SearchResults term={searchTerm} projects={projects} invoices={invoices} clients={admin ? clients : []} onOpenProject={openProject} onOpenInvoices={() => navigateTo('Invoices')} onOpenClients={() => navigateTo('Clients')} />
             </div>}
@@ -500,7 +500,7 @@ function App() {
 
         <div className="content">
           {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
-          {loading && <div className="loading-bar" aria-label="Loading workspace" />}
+          {loading && <div className="loading-bar" role="status" aria-label="Loading workspace" />}
           {selectedProject ? (
             <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => navigateTo('Projects')} />
           ) : activePage === 'Overview' ? (
@@ -510,7 +510,7 @@ function App() {
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} admin={Boolean(admin)} clients={clients} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           ) : activePage === 'Settings' ? (
-            <Settings workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
+            <Settings key={`${workspaceSettings.name}:${workspaceSettings.supportEmail}`} workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
           ) : activePage === 'Account' ? (
             <Account user={user} workspaceName={workspaceName} onSignOut={signOut} />
           ) : (
@@ -587,7 +587,7 @@ function NotificationsPopover({ items, unreadCount, loading, onMarkRead, onMarkA
   onMarkRead: (id: string) => void
   onMarkAllRead: () => void
 }) {
-  return <div className="popover notifications-popover" role="dialog" aria-label="Workspace notifications">
+  return <div className="popover notifications-popover" id="workspace-notifications-popover" role="dialog" aria-label="Workspace notifications">
     <div className="popover-title"><div><strong>Notifications</strong><span>Your workspace updates</span></div><span className="notification-count">{unreadCount}</span></div>
     {loading ? <p className="popover-hint">Loading notifications...</p> :
       items.length ? <div className="notification-list">{items.map((item) => <button key={item.id} className={`notification-item${item.isRead ? '' : ' unread'}`} onClick={() => onMarkRead(item.id)}>
@@ -611,10 +611,6 @@ function Settings({ workspaceName, admin, workspaceSettings, onSaveWorkspaceSett
 }) {
   const [name, setName] = useState(workspaceSettings.name)
   const [supportEmail, setSupportEmail] = useState(workspaceSettings.supportEmail)
-  useEffect(() => {
-    setName(workspaceSettings.name)
-    setSupportEmail(workspaceSettings.supportEmail)
-  }, [workspaceSettings])
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>Settings<span className="heading-period">.</span></h1><p>Choose how you’d like to use {workspaceName}.</p></div></div>
     <section className="panel settings-panel">
@@ -708,6 +704,7 @@ function Invoices({ invoices, token, admin, clients, onChanged }: {
   const [paymentComplete, setPaymentComplete] = useState(false)
   const [creating, setCreating] = useState(false)
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null)
+  const [newInvoiceDueDate, setNewInvoiceDueDate] = useState('')
   async function download(invoice: Invoice) {
     setBusy(invoice.id); setError('')
     try {
@@ -749,7 +746,7 @@ function Invoices({ invoices, token, admin, clients, onChanged }: {
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to export invoices.') }
   }
   return <div className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>Invoices<span className="heading-period">.</span></h1><p>Everything related to your billing, all together.</p></div><div className="invoice-heading-actions"><span className="invoice-total">{invoices.length} total</span>{admin && <><button className="cancel-button" onClick={() => void exportCsv()}>Export CSV</button><button className="primary-button" onClick={() => setCreating(true)}>＋ New invoice</button></>}</div></div>
+    <div className="page-heading"><div><div className="eyebrow">BILLING</div><h1>Invoices<span className="heading-period">.</span></h1><p>Everything related to your billing, all together.</p></div><div className="invoice-heading-actions"><span className="invoice-total">{invoices.length} total</span>{admin && <><button className="cancel-button" onClick={() => void exportCsv()}>Export CSV</button><button className="primary-button" onClick={() => { const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 30); setNewInvoiceDueDate(dueDate.toISOString().slice(0, 10)); setCreating(true) }}>＋ New invoice</button></>}</div></div>
     {error && <div className="alert" role="alert">{error}</div>}
     <section className="panel full-panel">
       <div className="invoice-table-head"><span>INVOICE</span><span>ISSUED</span><span>DUE DATE</span><span>STATUS</span><span>AMOUNT</span><span /></div>
@@ -772,6 +769,7 @@ function Invoices({ invoices, token, admin, clients, onChanged }: {
     </section>
     {!stripePromise && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <p className="payment-note">Online payments are not configured for this demo.</p>}
     {(creating || editingInvoice) && <InvoiceDraftModal invoice={editingInvoice} clients={clients} token={token}
+      initialDueDate={newInvoiceDueDate}
       onClose={() => { setCreating(false); setEditingInvoice(null) }}
       onSaved={() => { setCreating(false); setEditingInvoice(null); onChanged() }} />}
     {paymentInvoice && clientSecret && stripePromise && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setPaymentInvoice(null); setClientSecret('') } }}>
@@ -786,15 +784,16 @@ function Invoices({ invoices, token, admin, clients, onChanged }: {
   </div>
 }
 
-function InvoiceDraftModal({ invoice, clients, token, onClose, onSaved }: {
+function InvoiceDraftModal({ invoice, clients, token, initialDueDate, onClose, onSaved }: {
   invoice: Invoice | null
   clients: ClientSummary[]
   token: string
+  initialDueDate: string
   onClose: () => void
   onSaved: () => void
 }) {
   const [clientId, setClientId] = useState(invoice?.clientId ?? clients[0]?.id ?? '')
-  const [dueDate, setDueDate] = useState(invoice?.dueDate ?? new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10))
+  const [dueDate, setDueDate] = useState(invoice?.dueDate ?? initialDueDate)
   const [lines, setLines] = useState(() => invoice?.lines.map((line) => ({ ...line })) ?? [{ description: '', quantity: 1, unitPrice: 0 }])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1176,7 +1175,7 @@ function ProjectDetail({ project, comments, setComments, files, setFiles, token,
       </div>
       <section className="panel comments-panel">
         <div className="panel-heading"><div><h2>Conversation</h2><p>Keep project updates in one place.</p></div><span className="conversation-count">{comments.length}</span></div>
-        <div className="comments-list">{comments.length ? comments.map((comment) => <article className="comment" key={comment.id}>
+        <div className="comments-list" aria-live="polite" aria-label="Project updates">{comments.length ? comments.map((comment) => <article className="comment" key={comment.id}>
           <div className="comment-avatar">{comment.author.split(' ').map((part) => part[0]).join('').slice(0, 2)}</div>
           <div className="comment-body">
             <div><strong>{comment.author}</strong><time>{relativeDate(comment.createdAt)}</time></div>
