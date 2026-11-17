@@ -64,6 +64,11 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             StoredPath = storedPath, ContentType = expectedType, Size = file.Length, UploadedById = userId
         };
         db.ProjectFiles.Add(entity);
+        db.ActivityLogs.Add(new ActivityLog
+        {
+            ProjectId = projectId, ClientId = project.ClientId, ActorId = userId,
+            Action = "File uploaded", Metadata = entity.FileName
+        });
         try { await db.SaveChangesAsync(cancellationToken); }
         catch
         {
@@ -71,6 +76,49 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             throw;
         }
         return CreatedAtAction(nameof(List), new { projectId }, new { entity.Id, entity.FileName });
+    }
+
+    [HttpPatch("{fileId:guid}")]
+    public async Task<IActionResult> Rename(Guid projectId, Guid fileId, RenameFileRequest request, CancellationToken cancellationToken)
+    {
+        var file = await db.ProjectFiles.SingleOrDefaultAsync(
+            x => x.Id == fileId && x.ProjectId == projectId, cancellationToken);
+        if (file is null) return NotFound();
+        if (!CanManageFile(file.UploadedById)) return Forbid();
+        var fileName = Path.GetFileName(request.FileName?.Trim());
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Length > 255 ||
+            !AllowedTypes.TryGetValue(Path.GetExtension(fileName), out var expectedType) ||
+            !string.Equals(expectedType, file.ContentType, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Provide a valid file name with its original file type." });
+
+        var previousName = file.FileName;
+        file.FileName = fileName;
+        db.ActivityLogs.Add(new ActivityLog
+        {
+            ProjectId = projectId, ClientId = file.ClientId, ActorId = GetActorId(),
+            Action = "File renamed", Metadata = $"{previousName} to {fileName}"
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("{fileId:guid}")]
+    public async Task<IActionResult> Delete(Guid projectId, Guid fileId, CancellationToken cancellationToken)
+    {
+        var file = await db.ProjectFiles.SingleOrDefaultAsync(
+            x => x.Id == fileId && x.ProjectId == projectId, cancellationToken);
+        if (file is null) return NotFound();
+        if (!CanManageFile(file.UploadedById)) return Forbid();
+        var storedPath = file.StoredPath;
+        db.ProjectFiles.Remove(file);
+        db.ActivityLogs.Add(new ActivityLog
+        {
+            ProjectId = projectId, ClientId = file.ClientId, ActorId = GetActorId(),
+            Action = "File deleted", Metadata = file.FileName
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        await storage.DeleteAsync(storedPath, cancellationToken);
+        return NoContent();
     }
 
     [HttpGet("{fileId:guid}")]
@@ -98,4 +146,14 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         ".txt" => read >= 0,
         _ => false
     };
+
+    private bool CanManageFile(Guid uploadedById) =>
+        User.IsInRole("Admin") || Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) && userId == uploadedById;
+
+    private Guid GetActorId() =>
+        Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            ? userId
+            : throw new InvalidOperationException("The authenticated user identifier is missing.");
+
+    public sealed record RenameFileRequest(string FileName);
 }

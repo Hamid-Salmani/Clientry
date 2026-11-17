@@ -310,6 +310,41 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         return CreatedAtAction(nameof(Comments), new { projectId }, new { comment.Id });
     }
 
+    [HttpPut("{projectId:guid}/comments/{commentId:guid}")]
+    public async Task<IActionResult> UpdateComment(Guid projectId, Guid commentId, AddCommentRequest request, CancellationToken cancellationToken)
+    {
+        var comment = await db.Comments.SingleOrDefaultAsync(
+            x => x.Id == commentId && x.ProjectId == projectId, cancellationToken);
+        if (comment is null) return NotFound();
+        if (!CanManageComment(comment.AuthorId)) return Forbid();
+        if (string.IsNullOrWhiteSpace(request.Body) || request.Body.Length > 5000)
+            return BadRequest(new { message = "Comment is required (max 5,000 characters)." });
+        var project = await db.Projects.SingleAsync(x => x.Id == projectId, cancellationToken);
+        comment.Body = request.Body.Trim();
+        AddActivity(project, GetActorId(), "Comment updated", comment.Body);
+        await db.SaveChangesAsync(cancellationToken);
+        await hub.Clients.Group($"project:{projectId}").SendAsync("CommentUpdated", new
+        {
+            comment.Id, comment.Body, comment.CreatedAt, author = User.Identity?.Name
+        }, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("{projectId:guid}/comments/{commentId:guid}")]
+    public async Task<IActionResult> DeleteComment(Guid projectId, Guid commentId, CancellationToken cancellationToken)
+    {
+        var comment = await db.Comments.SingleOrDefaultAsync(
+            x => x.Id == commentId && x.ProjectId == projectId, cancellationToken);
+        if (comment is null) return NotFound();
+        if (!CanManageComment(comment.AuthorId)) return Forbid();
+        var project = await db.Projects.SingleAsync(x => x.Id == projectId, cancellationToken);
+        db.Comments.Remove(comment);
+        AddActivity(project, GetActorId(), "Comment deleted", "A project update was removed.");
+        await db.SaveChangesAsync(cancellationToken);
+        await hub.Clients.Group($"project:{projectId}").SendAsync("CommentDeleted", new { comment.Id }, cancellationToken);
+        return NoContent();
+    }
+
     private async Task<IActionResult> SetArchivedStatusAsync(Guid projectId, CancellationToken cancellationToken)
     {
         var project = await db.Projects.SingleOrDefaultAsync(x => x.Id == projectId, cancellationToken);
@@ -328,6 +363,9 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actorId)
             ? actorId
             : throw new InvalidOperationException("The authenticated user identifier is missing.");
+
+    private bool CanManageComment(Guid authorId) =>
+        User.IsInRole("Admin") || Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) && userId == authorId;
 
     private void AddActivity(Project project, Guid actorId, string action, string metadata) =>
         db.ActivityLogs.Add(new ActivityLog

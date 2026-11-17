@@ -683,6 +683,14 @@ function ProjectDetail({ project, comments, setComments, files, token, commentTe
       setComments((existing) => existing.some((item) => item.id === comment.id) ? existing : [...existing, comment])
       setRealtimeError('')
     })
+    connection.on('CommentUpdated', (comment: Comment) => {
+      setComments((existing) => existing.map((item) => item.id === comment.id ? comment : item))
+      setRealtimeError('')
+    })
+    connection.on('CommentDeleted', (event: { id: string }) => {
+      setComments((existing) => existing.filter((item) => item.id !== event.id))
+      setRealtimeError('')
+    })
     connection.onreconnecting(() => setRealtimeError('Live updates reconnecting…'))
     connection.onreconnected(() => setRealtimeError(''))
     connection.start().catch(() => setRealtimeError('Live updates are unavailable. You can still post updates.'))
