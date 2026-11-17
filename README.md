@@ -114,6 +114,19 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 - Invoice discount and tax values are fixed currency amounts entered by the agency; the supported invoice currency remains USD. Billing email addresses are separated by commas or semicolons and limited to five addresses.
 - The first client user is Owner; subsequent invited users are Members. Owners can invite and deactivate Members but cannot deactivate themselves or another Owner. Administrator reassignment promotes one active user and demotes the prior owner to Member.
 
+## Client guide
+
+Sign in with a client demo account from the Demo accounts table, or accept an invitation from the agency or your client Owner. Your workspace opens on **Home**, where pending approvals, unpaid invoices, unread notifications, recent project activity, and upcoming milestones are summarized.
+
+- **Projects:** Open a project to follow milestones, review activity, comment, preview supported images or PDFs, upload files, or download the project archive.
+- **Approvals:** Approve a pending milestone to mark it complete, or request changes with a note for the agency.
+- **Requests:** Create a work request, attach up to three files, track its status and agency response, and cancel it while it is new.
+- **Invoices:** Review line items, taxes, discounts, payments, and status history. Pay an eligible invoice or download its receipt after it is paid.
+- **Team and billing:** Owners can invite colleagues, deactivate Members, and update billing details. Members can view workspace billing details but cannot change them or manage team access.
+- **Notifications and account:** Filter and mark notifications read, follow their links to the related workspace item, edit your profile, change your password, update notification preferences, and sign out of all devices.
+
+Administrators manage client records, projects, milestones, invoices, and work requests from their separate workspace. Client accounts cannot access administrator-only routes or another client's data.
+
 ## Current limitations
 
 This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and scheduled reminders, invoice numbers beyond generated unique identifiers, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.
