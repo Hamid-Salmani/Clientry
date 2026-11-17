@@ -1,5 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { HubConnectionBuilder } from '@microsoft/signalr'
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
@@ -82,7 +84,6 @@ function App() {
   const [fullName, setFullName] = useState('')
   const [loginError, setLoginError] = useState('')
   const [isRegisterMode, setIsRegisterMode] = useState(false)
-  const [activePage, setActivePage] = useState('Overview')
   const [openPopover, setOpenPopover] = useState<'search' | 'notifications' | 'workspace' | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([])
@@ -109,11 +110,20 @@ function App() {
   const [comments, setComments] = useState<Comment[]>([])
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([])
   const [commentText, setCommentText] = useState('')
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const workspaceRef = useRef<HTMLDivElement>(null)
   const actionsRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const routerNavigate = useNavigate()
+  const queryClient = useQueryClient()
+  const location = useLocation()
+  const projectRouteId = location.pathname.match(/^\/projects\/([0-9a-f-]+)$/i)?.[1]
+  const activePage = location.pathname.startsWith('/clients') ? 'Clients'
+    : location.pathname.startsWith('/projects') ? 'Projects'
+      : location.pathname.startsWith('/invoices') ? 'Invoices'
+        : location.pathname.startsWith('/settings') ? 'Settings'
+          : location.pathname.startsWith('/account') ? 'Account'
+            : 'Overview'
 
   const admin = user?.role === 'Admin'
   const workspaceName = admin ? workspaceSettings.name : 'Northstar Studio'
@@ -123,9 +133,14 @@ function App() {
     setTheme(nextTheme)
   }
   const navigateTo = (page: string) => {
-    setActivePage(page)
     setSelectedProject(null)
     setOpenPopover(null)
+    routerNavigate(page === 'Overview' ? '/' : `/${page.toLowerCase()}`)
+  }
+  const openProject = (project: Project) => {
+    openProject(project)
+    setOpenPopover(null)
+    routerNavigate(`/projects/${project.id}`)
   }
 
   useEffect(() => {
@@ -153,65 +168,108 @@ function App() {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
-  const loadData = useCallback(async (authToken: string, currentUser: User) => {
-    setLoading(true)
-    setError('')
-    try {
+  const profileQuery = useQuery({
+    queryKey: ['profile', token],
+    queryFn: () => request<{ name: string; role: User['role'] }>('/auth/me', token),
+    enabled: Boolean(token),
+  })
+  const workspaceQuery = useQuery({
+    queryKey: ['workspace', token, user?.role],
+    enabled: Boolean(token && user),
+    queryFn: async () => {
       const [projectData, invoiceData] = await Promise.all([
-        request<{ items: Project[] }>('/projects?page=1&pageSize=100', authToken),
-        request<{ items: Invoice[] }>('/invoices?page=1&pageSize=100', authToken),
+        request<{ items: Project[] }>('/projects?page=1&pageSize=100', token),
+        request<{ items: Invoice[] }>('/invoices?page=1&pageSize=100', token),
       ])
-      setProjects(projectData.items)
-      setInvoices(invoiceData.items)
-      if (currentUser.role === 'Admin') {
-        const [dashboard, clientData, settings] = await Promise.all([
-          request<Metrics>('/admin/dashboard', authToken),
-          request<{ items: typeof clients }>('/admin/clients?page=1&pageSize=100', authToken),
-          request<AdminWorkspaceSettings>('/admin/workspace-settings', authToken),
-        ])
-        setMetrics(dashboard)
-        setClients(clientData.items)
-        setWorkspaceSettings(settings)
+      if (user?.role !== 'Admin') return { projects: projectData.items, invoices: invoiceData.items }
+      const [dashboard, clientData, settings] = await Promise.all([
+        request<Metrics>('/admin/dashboard', token),
+        request<{ items: { id: string; companyName: string; contact?: string; activeProjects: number }[] }>('/admin/clients?page=1&pageSize=100', token),
+        request<AdminWorkspaceSettings>('/admin/workspace-settings', token),
+      ])
+      return {
+        projects: projectData.items, invoices: invoiceData.items,
+        metrics: dashboard, clients: clientData.items, settings,
       }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to load your workspace.')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    },
+  })
+  const preferencesQuery = useQuery({
+    queryKey: ['notification-preferences', token],
+    queryFn: () => request<NotificationPreferences>('/notifications/preferences', token),
+    enabled: Boolean(token),
+  })
+  const projectContentQuery = useQuery({
+    queryKey: ['project-content', token, selectedProject?.id],
+    queryFn: async () => {
+      const [comments, files] = await Promise.all([
+        request<{ items: Comment[] }>(`/projects/${selectedProject?.id}/comments?page=1&pageSize=100`, token),
+        request<{ items: ProjectFile[] }>(`/projects/${selectedProject?.id}/files?page=1&pageSize=100`, token),
+      ])
+      return { comments: comments.items, files: files.items }
+    },
+    enabled: Boolean(token && selectedProject),
+  })
+  const loading = profileQuery.isLoading || workspaceQuery.isLoading
 
   useEffect(() => {
-    if (!token) return
-    request<{ name: string; role: User['role'] }>('/auth/me', token)
-      .then((profile) => {
-        const currentUser = { name: profile.name, role: profile.role }
-        setUser(currentUser)
-        void loadData(token, currentUser)
-      })
-      .catch(() => signOut())
+    if (!profileQuery.data) return
+    setUser({ name: profileQuery.data.name, role: profileQuery.data.role })
+  }, [profileQuery.data])
+
+  useEffect(() => {
+    if (!profileQuery.isError) return
+    signOut()
   // signOut intentionally follows the stored token lifetime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, loadData])
+  }, [profileQuery.isError])
 
   useEffect(() => {
-    if (!token) return
-    request<NotificationPreferences>('/notifications/preferences', token)
-      .then((preferences) => {
-        setWorkspaceUpdates(preferences.workspaceUpdates)
-        setInvoiceReminders(preferences.invoiceReminders)
-      })
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load notification preferences.'))
-  }, [token])
+    if (workspaceQuery.data) {
+      setProjects(workspaceQuery.data.projects)
+      setInvoices(workspaceQuery.data.invoices)
+      if ('metrics' in workspaceQuery.data && workspaceQuery.data.metrics &&
+        workspaceQuery.data.clients && workspaceQuery.data.settings) {
+        setMetrics(workspaceQuery.data.metrics)
+        setClients(workspaceQuery.data.clients)
+        setWorkspaceSettings(workspaceQuery.data.settings)
+      }
+    }
+    if (workspaceQuery.error)
+      setError(workspaceQuery.error instanceof Error ? workspaceQuery.error.message : 'Unable to load your workspace.')
+  }, [workspaceQuery.data, workspaceQuery.error])
 
   useEffect(() => {
-    if (!selectedProject || !token) return
-    request<{ items: Comment[] }>(`/projects/${selectedProject.id}/comments?page=1&pageSize=100`, token)
-      .then((result) => setComments(result.items))
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load comments.'))
-    request<{ items: ProjectFile[] }>(`/projects/${selectedProject.id}/files?page=1&pageSize=100`, token)
-      .then((result) => setProjectFiles(result.items))
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load files.'))
-  }, [selectedProject, token])
+    if (preferencesQuery.data) {
+      setWorkspaceUpdates(preferencesQuery.data.workspaceUpdates)
+      setInvoiceReminders(preferencesQuery.data.invoiceReminders)
+    }
+    if (preferencesQuery.error)
+      setError(preferencesQuery.error instanceof Error ? preferencesQuery.error.message : 'Unable to load notification preferences.')
+  }, [preferencesQuery.data, preferencesQuery.error])
+
+  useEffect(() => {
+    if (projectContentQuery.data) {
+      setComments(projectContentQuery.data.comments)
+      setProjectFiles(projectContentQuery.data.files)
+    }
+    if (projectContentQuery.error)
+      setError(projectContentQuery.error instanceof Error ? projectContentQuery.error.message : 'Unable to load project details.')
+  }, [projectContentQuery.data, projectContentQuery.error])
+
+  useEffect(() => {
+    if (!projectRouteId || !token) {
+      if (!projectRouteId) setSelectedProject(null)
+      return
+    }
+    const project = projects.find((item) => item.id === projectRouteId)
+    if (project) {
+      setSelectedProject(project)
+      return
+    }
+    request<Project>(`/projects/${projectRouteId}`, token)
+      .then(setSelectedProject)
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load project.'))
+  }, [projectRouteId, projects, token])
 
   const signOut = () => {
     sessionStorage.removeItem('clienthub-token')
@@ -220,6 +278,7 @@ function App() {
     setSelectedProject(null)
     setNotificationItems([])
     setUnreadNotificationCount(0)
+    routerNavigate('/login')
   }
 
   async function loadNotifications() {
@@ -289,6 +348,7 @@ function App() {
       setUser({ name: result.name, role: result.role })
       setToken(result.accessToken)
       setIsRegisterMode(false)
+      routerNavigate('/')
     } catch (reason) {
       setLoginError(reason instanceof Error ? reason.message : 'Sign in failed.')
     }
@@ -305,6 +365,7 @@ function App() {
       setUser({ name: result.name, role: result.role })
       setToken(result.accessToken)
       setIsRegisterMode(false)
+      routerNavigate('/')
     } catch (reason) {
       setLoginError(reason instanceof Error ? reason.message : 'Account creation failed.')
     }
@@ -416,7 +477,7 @@ function App() {
             <button className="topbar-avatar" aria-label={`Open ${user.name}'s account`} onClick={() => navigateTo('Account')}>{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</button>
             {openPopover === 'search' && <div className="popover search-popover" role="dialog" aria-label="Search workspace">
               <label className="search-field"><Icon name="search" /><input ref={searchInputRef} value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setOpenPopover(null) }} placeholder="Search projects, invoices, clients..." /><button className="icon-button" onClick={() => setOpenPopover(null)} aria-label="Close search"><Icon name="close" /></button></label>
-              <SearchResults term={searchTerm} projects={projects} invoices={invoices} clients={admin ? clients : []} onOpenProject={(project) => { setSelectedProject(project); setOpenPopover(null) }} onOpenInvoices={() => navigateTo('Invoices')} onOpenClients={() => navigateTo('Clients')} />
+              <SearchResults term={searchTerm} projects={projects} invoices={invoices} clients={admin ? clients : []} onOpenProject={openProject} onOpenInvoices={() => navigateTo('Invoices')} onOpenClients={() => navigateTo('Clients')} />
             </div>}
             {openPopover === 'notifications' && <NotificationsPopover items={notificationItems} unreadCount={unreadNotificationCount} loading={notificationLoading} onMarkRead={(id) => void markNotificationRead(id)} onMarkAllRead={() => void markAllNotificationsRead()} />}
           </div>
@@ -426,11 +487,11 @@ function App() {
           {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
           {loading && <div className="loading-bar" aria-label="Loading workspace" />}
           {selectedProject ? (
-            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} token={token} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => setSelectedProject(null)} />
+            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} token={token} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => navigateTo('Projects')} />
           ) : activePage === 'Overview' ? (
-            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} onOpenProject={setSelectedProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
+            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
           ) : activePage === 'Projects' ? (
-            <Projects projects={projects} onOpenProject={setSelectedProject} />
+            <Projects projects={projects} onOpenProject={openProject} />
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} />
           ) : activePage === 'Settings' ? (
@@ -442,7 +503,7 @@ function App() {
           )}
         </div>
       </main>
-      {creatingProject && <ProjectCreateModal clients={clients} token={token} onClose={() => setCreatingProject(false)} onCreated={() => { setCreatingProject(false); if (user) void loadData(token, user) }} />}
+      {creatingProject && <ProjectCreateModal clients={clients} token={token} onClose={() => setCreatingProject(false)} onCreated={() => { setCreatingProject(false); void queryClient.invalidateQueries({ queryKey: ['workspace', token] }) }} />}
     </div>
   )
 }
