@@ -61,7 +61,7 @@ type Metrics = {
   recentActivity: { action: string; metadata: string; createdAt: string }[]
 }
 type Comment = { id: string; authorId: string; body: string; createdAt: string; author: string }
-type ProjectFile = { id: string; fileName: string; contentType: string; size: number; uploadedAt: string; uploadedById: string }
+type ProjectFile = { id: string; fileName: string; contentType: string; size: number; uploadedAt: string; uploadedById: string; uploadedByRole?: string }
 type NotificationItem = { id: string; type: string; message: string; isRead: boolean; createdAt: string }
 type NotificationPreferences = { workspaceUpdates: boolean; invoiceReminders: boolean }
 type AdminWorkspaceSettings = { name: string; supportEmail: string }
@@ -444,17 +444,45 @@ function App() {
     }
   }
 
-  async function uploadFile(file: File) {
-    if (!selectedProject) return
-    try {
+  async function uploadFile(file: File, onProgress: (progress: number) => void) {
+    if (!selectedProject) throw new Error('Choose a project before uploading.')
+    await new Promise<void>((resolve, reject) => {
       const data = new FormData()
       data.append('file', file)
-      await request(`/projects/${selectedProject.id}/files`, token, { method: 'POST', body: data })
-      const result = await request<{ items: ProjectFile[] }>(`/projects/${selectedProject.id}/files?page=1&pageSize=100`, token)
-      setProjectFiles(result.items)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to upload this file.')
+      const upload = new XMLHttpRequest()
+      upload.open('POST', `${apiBase}/api/projects/${selectedProject.id}/files`)
+      upload.setRequestHeader('Authorization', `Bearer ${token}`)
+      upload.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100))
+      }
+      upload.onerror = () => reject(new Error('Network error while uploading this file.'))
+      upload.onload = () => {
+        if (upload.status < 200 || upload.status >= 300) {
+          let message = `Upload failed (${upload.status}).`
+          try { message = JSON.parse(upload.responseText).message ?? message } catch { /* use the HTTP status */ }
+          reject(new Error(message))
+          return
+        }
+        onProgress(100)
+        resolve()
+      }
+      upload.send(data)
+    })
+    const result = await request<{ items: ProjectFile[] }>(`/projects/${selectedProject.id}/files?page=1&pageSize=100`, token)
+    setProjectFiles(result.items)
+  }
+
+  async function downloadProjectZip(projectId: string) {
+    const response = await fetch(`${apiBase}/api/projects/${projectId}/files.zip`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { message?: string } | null
+      throw new Error(body?.message ?? `Archive download failed (${response.status}).`)
     }
+    const url = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'project-files.zip'; anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   async function downloadFile(file: ProjectFile) {
@@ -550,7 +578,7 @@ function App() {
           {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
           {loading && <div className="loading-bar" role="status" aria-label="Loading workspace" />}
           {selectedProject ? (
-            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onProjectChanged={() => refreshProject(selectedProject.id)} onBack={() => navigateTo('Projects')} />
+            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onDownloadZip={downloadProjectZip} onProjectChanged={() => refreshProject(selectedProject.id)} onBack={() => navigateTo('Projects')} />
           ) : activePage === 'Overview' ? (
             <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} supportEmail={supportEmail} clientOverview={clientOverviewQuery.data ?? null} clientOverviewLoading={clientOverviewQuery.isLoading} clientOverviewError={clientOverviewQuery.error instanceof Error ? clientOverviewQuery.error.message : ''} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onOpenApprovals={() => navigateTo('Approvals')} onOpenNotifications={() => { setOpenPopover('notifications'); void loadNotifications() }} onCreateProject={() => setCreatingProject(true)} />
           ) : activePage === 'Projects' ? (
@@ -1369,11 +1397,12 @@ function ProjectCreateModal({ clients, token, onClose, onCreated }: {
   </div>
 }
 
-function ProjectDetail({ project, comments, setComments, files, setFiles, token, currentUserId, isAdmin, commentText, setCommentText, onSubmit, onUpload, onDownload, onProjectChanged, onBack }: {
+function ProjectDetail({ project, comments, setComments, files, setFiles, token, currentUserId, isAdmin, commentText, setCommentText, onSubmit, onUpload, onDownload, onDownloadZip, onProjectChanged, onBack }: {
   project: Project; comments: Comment[]; setComments: React.Dispatch<React.SetStateAction<Comment[]>>
   files: ProjectFile[]; setFiles: React.Dispatch<React.SetStateAction<ProjectFile[]>>
   token: string; currentUserId: string; isAdmin: boolean; commentText: string; setCommentText: (value: string) => void
-  onSubmit: (event: FormEvent) => void; onUpload: (file: File) => void; onDownload: (file: ProjectFile) => void
+  onSubmit: (event: FormEvent) => void; onUpload: (file: File, onProgress: (progress: number) => void) => Promise<void>
+  onDownload: (file: ProjectFile) => void; onDownloadZip: (projectId: string) => Promise<void>
   onProjectChanged: () => Promise<void>; onBack: () => void
 }) {
   const [realtimeError, setRealtimeError] = useState('')
@@ -1383,6 +1412,44 @@ function ProjectDetail({ project, comments, setComments, files, setFiles, token,
   const [editingFile, setEditingFile] = useState<string | null>(null)
   const [fileNameDraft, setFileNameDraft] = useState('')
   const [busyAction, setBusyAction] = useState(false)
+  const [uploadStatuses, setUploadStatuses] = useState<{ id: string; name: string; progress: number; error?: string }[]>([])
+  const [preview, setPreview] = useState<{ file: ProjectFile; url: string } | null>(null)
+
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview.url)
+  }, [preview])
+
+  async function uploadFiles(selectedFiles: File[]) {
+    const newStatuses = selectedFiles.map((file) => ({ id: crypto.randomUUID(), name: file.name, progress: 0 }))
+    setUploadStatuses((existing) => [...existing, ...newStatuses])
+    await Promise.all(selectedFiles.map(async (file, index) => {
+      const uploadId = newStatuses[index].id
+      try {
+        await onUpload(file, (progress) => setUploadStatuses((existing) => existing.map((status) =>
+          status.id === uploadId ? { ...status, progress } : status)))
+      } catch (reason) {
+        setUploadStatuses((existing) => existing.map((status) => status.id === uploadId
+          ? { ...status, error: reason instanceof Error ? reason.message : 'Upload failed.' }
+          : status))
+      }
+    }))
+  }
+
+  async function openPreview(file: ProjectFile) {
+    setActionError('')
+    try {
+      const response = await fetch(`${apiBase}/api/projects/${project.id}/files/${file.id}/preview`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { message?: string } | null
+        throw new Error(body?.message ?? `Preview failed (${response.status}).`)
+      }
+      setPreview({ file, url: URL.createObjectURL(await response.blob()) })
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Unable to preview this file.')
+    }
+  }
 
   async function requestApproval(milestoneId: string) {
     setBusyAction(true); setActionError('')
@@ -1505,8 +1572,16 @@ function ProjectDetail({ project, comments, setComments, files, setFiles, token,
           <div className="project-dates"><span>Started <b>{new Date(project.startDate).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</b></span><span>Due <b>{project.dueDate ? new Date(project.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Not set'}</b></span></div>
         </section>
         <section className="panel files-panel">
-          <div className="panel-heading"><div><h2>Project files</h2><p>Shared files for this project.</p></div><label className="upload-button"><Icon name="upload" /> Upload<input type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.currentTarget.value = '' }} /></label></div>
-          {files.length ? <div className="file-list">{files.map((file) => <div className="file-row" key={file.id}>
+          <div className="panel-heading"><div><h2>Project files</h2><p>Shared files for this project.</p></div><div className="file-header-actions"><button className="download-button" onClick={() => {
+            setBusyAction(true); setActionError('')
+            void onDownloadZip(project.id).catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : 'Unable to download the project archive.')).finally(() => setBusyAction(false))
+          }} disabled={busyAction || files.length === 0}>Download ZIP</button><label className="upload-button"><Icon name="upload" /> Upload<input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={(event) => { const selected = Array.from(event.target.files ?? []); if (selected.length) void uploadFiles(selected); event.currentTarget.value = '' }} /></label></div></div>
+          <div className="file-drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const dropped = Array.from(event.dataTransfer.files); if (dropped.length) void uploadFiles(dropped) }}>Drop files here or use Upload. PDF, PNG, JPEG, and TXT up to 10 MB.</div>
+          {uploadStatuses.length > 0 && <div className="file-upload-statuses" aria-live="polite">{uploadStatuses.map((status) => <div className={`file-upload-status ${status.error ? 'failed' : ''}`} key={status.id}><span>{status.name}</span>{status.error ? <strong role="alert">{status.error}</strong> : <><progress max="100" value={status.progress} aria-label={`Uploading ${status.name}`} /><small>{status.progress}%</small></>}</div>)}</div>}
+          {files.length ? <div className="file-list">{(['Admin', 'Client'] as const).map((role) => {
+            const groupedFiles = files.filter((file) => (file.uploadedByRole === 'Client' ? 'Client' : 'Admin') === role)
+            if (!groupedFiles.length) return null
+            return <div className="file-group" key={role}><h3>{role === 'Client' ? 'Uploaded by client' : 'Uploaded by agency'}</h3>{groupedFiles.map((file) => <div className="file-row" key={file.id}>
             <span className="invoice-file"><Icon name="file" /></span>
             {editingFile === file.id ? <form className="inline-edit-form" onSubmit={(event) => void renameFile(event, file)}>
               <label className="sr-only" htmlFor={`file-name-${file.id}`}>File name</label>
@@ -1514,12 +1589,14 @@ function ProjectDetail({ project, comments, setComments, files, setFiles, token,
               <button className="download-button" type="submit" disabled={busyAction}>Save</button>
               <button className="cancel-button" type="button" onClick={() => setEditingFile(null)} disabled={busyAction}>Cancel</button>
             </form> : <span className="file-meta"><strong>{file.fileName}</strong><small>{(file.size / 1024).toFixed(0)} KB · {relativeDate(file.uploadedAt)}</small></span>}
+            {['image/png', 'image/jpeg', 'application/pdf'].includes(file.contentType) && <button className="download-button" onClick={() => void openPreview(file)}>Preview</button>}
             <button className="download-button" onClick={() => onDownload(file)}>Download <Icon name="arrow" /></button>
             {(isAdmin || file.uploadedById === currentUserId) && editingFile !== file.id && <>
               <button className="download-button" onClick={() => { setEditingFile(file.id); setFileNameDraft(file.fileName); setActionError('') }}>Rename</button>
               <button className="cancel-button" onClick={() => void deleteFile(file)} disabled={busyAction}>Delete</button>
             </>}
-          </div>)}</div> : <EmptyState title="No files shared yet" text="Upload a file to keep everything in one place." />}
+          </div>)}</div>
+          })}</div> : <EmptyState title="No files shared yet" text="Upload a file to keep everything in one place." />}
         </section>
       </div>
       <section className="panel comments-panel">
@@ -1543,6 +1620,15 @@ function ProjectDetail({ project, comments, setComments, files, setFiles, token,
         <form className="comment-form" onSubmit={onSubmit}><label className="sr-only" htmlFor="comment">Write an update</label><textarea id="comment" value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Write an update..." maxLength={5000} /><button className="primary-button" disabled={!commentText.trim()}>Send update <Icon name="arrow" /></button></form>
       </section>
     </div>
+    {preview && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreview(null) }}>
+      <section className="payment-modal file-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="file-preview-title">
+        <button className="modal-close" onClick={() => setPreview(null)} aria-label="Close file preview">×</button>
+        <div className="eyebrow">PROJECT FILE</div><h2 id="file-preview-title">{preview.file.fileName}</h2>
+        {preview.file.contentType === 'application/pdf'
+          ? <iframe title={`Preview of ${preview.file.fileName}`} src={preview.url} />
+          : <img src={preview.url} alt={preview.file.fileName} />}
+      </section>
+    </div>}
   </div>
 }
 

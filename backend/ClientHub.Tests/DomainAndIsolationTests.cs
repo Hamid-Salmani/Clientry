@@ -13,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.IO.Compression;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -355,6 +356,72 @@ public sealed class DomainAndIsolationTests
         var secondResponse = Assert.IsType<OkObjectResult>(await controller.Overview(CancellationToken.None));
         using var second = JsonDocument.Parse(JsonSerializer.Serialize(secondResponse.Value));
         Assert.Empty(second.RootElement.GetProperty("recentProjectActivity").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ProjectFilePreviewAndArchiveAreScopedAndSizeCapped()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var clientA = new Client { CompanyName = "File Client A", Notes = "" };
+        var clientB = new Client { CompanyName = "File Client B", Notes = "" };
+        var userA = new User { Email = "file-a@example.test", FullName = "A", Role = UserRole.Client, ClientId = clientA.Id, PasswordHash = "hash" };
+        var userB = new User { Email = "file-b@example.test", FullName = "B", Role = UserRole.Client, ClientId = clientB.Id, PasswordHash = "hash" };
+        var projectA = new Project { ClientId = clientA.Id, Name = "A", Description = "", StartDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        var projectB = new Project { ClientId = clientB.Id, Name = "B", Description = "", StartDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        var oversizedProject = new Project { ClientId = clientA.Id, Name = "Large", Description = "", StartDate = DateOnly.FromDateTime(DateTime.UtcNow) };
+        var image = new ProjectFile
+        {
+            ClientId = clientA.Id, ProjectId = projectA.Id, FileName = "preview.png",
+            StoredPath = "preview", ContentType = "image/png", Size = 4, UploadedById = userA.Id
+        };
+        var foreignFile = new ProjectFile
+        {
+            ClientId = clientB.Id, ProjectId = projectB.Id, FileName = "secret.txt",
+            StoredPath = "foreign", ContentType = "text/plain", Size = 6, UploadedById = userB.Id
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using (var seed = new ClientHubDbContext(options, new TestScope(null, null, false)))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.AddRange(clientA, clientB, userA, userB, projectA, projectB, oversizedProject, image, foreignFile,
+                new ProjectFile
+                {
+                    ClientId = clientA.Id, ProjectId = oversizedProject.Id, FileName = "large.bin",
+                    StoredPath = "large", ContentType = "text/plain", Size = 51 * 1024 * 1024, UploadedById = userA.Id
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        var storage = new MemoryFileStorage(new Dictionary<string, byte[]>
+        {
+            ["preview"] = [1, 2, 3, 4], ["foreign"] = [5, 6, 7, 8, 9, 10], ["large"] = [1]
+        });
+        await using var db = new ClientHubDbContext(options, new TestScope(clientA.Id, userA.Id, true));
+        var controller = new FilesController(db, storage);
+        SetAuthenticatedUser(controller, userA.Id, UserRole.Client, clientA.Id);
+        var zip = Assert.IsType<FileStreamResult>(await controller.DownloadZip(projectA.Id, CancellationToken.None));
+        using (var archive = new ZipArchive(zip.FileStream, ZipArchiveMode.Read))
+        {
+            Assert.Equal(["preview.png"], archive.Entries.Select(entry => entry.FullName));
+            Assert.DoesNotContain(archive.Entries, entry => entry.FullName.Contains("secret", StringComparison.OrdinalIgnoreCase));
+        }
+        Assert.IsType<NotFoundResult>(await controller.DownloadZip(projectB.Id, CancellationToken.None));
+        var oversized = Assert.IsType<ObjectResult>(await controller.DownloadZip(oversizedProject.Id, CancellationToken.None));
+        Assert.Equal(StatusCodes.Status413PayloadTooLarge, oversized.StatusCode);
+
+        var preview = Assert.IsType<FileStreamResult>(await controller.Preview(projectA.Id, image.Id, CancellationToken.None));
+        Assert.Equal("image/png", preview.ContentType);
+        Assert.Equal("nosniff", controller.Response.Headers["X-Content-Type-Options"]);
+        var textFile = new ProjectFile
+        {
+            ClientId = clientA.Id, ProjectId = projectA.Id, FileName = "notes.txt",
+            StoredPath = "text", ContentType = "text/plain", Size = 1, UploadedById = userA.Id
+        };
+        db.ProjectFiles.Add(textFile);
+        await db.SaveChangesAsync();
+        Assert.IsType<BadRequestObjectResult>(await controller.Preview(projectA.Id, textFile.Id, CancellationToken.None));
+        Assert.IsType<NotFoundResult>(await controller.Preview(projectB.Id, foreignFile.Id, CancellationToken.None));
     }
 
     [Fact]
@@ -741,5 +808,28 @@ public sealed class DomainAndIsolationTests
 
         public Task DeleteAsync(string storedPath, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("File storage is not used by this test.");
+    }
+
+    private sealed class MemoryFileStorage(IReadOnlyDictionary<string, byte[]> files) : IFileStorage
+    {
+        public async Task<string> SaveAsync(Stream content, CancellationToken cancellationToken)
+        {
+            var path = Guid.NewGuid().ToString("N");
+            using var buffer = new MemoryStream();
+            await content.CopyToAsync(buffer, cancellationToken);
+            ((Dictionary<string, byte[]>)files)[path] = buffer.ToArray();
+            return path;
+        }
+
+        public Task<Stream> OpenReadAsync(string storedPath, CancellationToken cancellationToken) =>
+            files.TryGetValue(storedPath, out var content)
+                ? Task.FromResult<Stream>(new MemoryStream(content, writable: false))
+                : throw new FileNotFoundException();
+
+        public Task DeleteAsync(string storedPath, CancellationToken cancellationToken)
+        {
+            ((Dictionary<string, byte[]>)files).Remove(storedPath);
+            return Task.CompletedTask;
+        }
     }
 }

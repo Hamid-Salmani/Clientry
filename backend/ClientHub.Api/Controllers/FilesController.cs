@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.IO.Compression;
 using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
@@ -14,6 +15,7 @@ namespace ClientHub.Api.Controllers;
 public sealed class FilesController(ClientHubDbContext db, IFileStorage storage) : ControllerBase
 {
     private const long MaxFileSize = 10 * 1024 * 1024;
+    private const long MaxZipSize = 50 * 1024 * 1024;
     private static readonly IReadOnlyDictionary<string, string> AllowedTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         [".pdf"] = "application/pdf",
@@ -40,7 +42,12 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
         var items = await query.OrderByDescending(x => x.UploadedAt).ThenBy(x => x.Id)
             .Skip(skip).Take(pageSize)
-            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt, x.UploadedById }).ToListAsync(cancellationToken);
+            .Select(x => new
+            {
+                x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt, x.UploadedById,
+                uploadedByRole = db.Users.Where(user => user.Id == x.UploadedById)
+                    .Select(user => user.Role.ToString()).SingleOrDefault()
+            }).ToListAsync(cancellationToken);
         return Ok(new PagedResult<object>(items.Cast<object>().ToArray(), total, page, pageSize));
     }
 
@@ -153,6 +160,89 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         {
             return NotFound();
         }
+    }
+
+    [HttpGet("{fileId:guid}/preview")]
+    public async Task<IActionResult> Preview(Guid projectId, Guid fileId, CancellationToken cancellationToken)
+    {
+        var file = await db.ProjectFiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == fileId && x.ProjectId == projectId, cancellationToken);
+        if (file is null) return NotFound();
+        if (file.ContentType is not ("image/png" or "image/jpeg" or "application/pdf"))
+            return BadRequest(new { message = "Only PNG, JPEG, and PDF files can be previewed." });
+        try
+        {
+            var stream = await storage.OpenReadAsync(file.StoredPath, cancellationToken);
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
+            Response.Headers.ContentDisposition = "inline";
+            return File(stream, file.ContentType);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpGet("/api/projects/{projectId:guid}/files.zip")]
+    public async Task<IActionResult> DownloadZip(Guid projectId, CancellationToken cancellationToken)
+    {
+        if (!await db.Projects.AnyAsync(project => project.Id == projectId, cancellationToken))
+            return NotFound();
+        var files = await db.ProjectFiles.AsNoTracking().Where(file => file.ProjectId == projectId)
+            .OrderBy(file => file.UploadedAt).Select(file => new
+            {
+                file.FileName, file.StoredPath, file.Size
+            }).ToListAsync(cancellationToken);
+        if (files.Sum(file => file.Size) > MaxZipSize)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new { message = "The project's files exceed the 50 MB archive limit." });
+
+        var archiveStream = new MemoryStream();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long copiedBytes = 0;
+        try
+        {
+            using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var file in files)
+                {
+                    var entryName = CreateUniqueEntryName(file.FileName, usedNames);
+                    var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    await using var source = await storage.OpenReadAsync(file.StoredPath, cancellationToken);
+                    await using var destination = entry.Open();
+                    var buffer = new byte[81920];
+                    int read;
+                    while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
+                    {
+                        copiedBytes += read;
+                        if (copiedBytes > MaxZipSize)
+                            return StatusCode(StatusCodes.Status413PayloadTooLarge, new { message = "The project's files exceed the 50 MB archive limit." });
+                        await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    }
+                }
+            }
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+        archiveStream.Position = 0;
+        return File(archiveStream, "application/zip", $"project-{projectId:N}-files.zip");
+    }
+
+    private static string CreateUniqueEntryName(string fileName, HashSet<string> usedNames)
+    {
+        var name = fileName.Replace('\\', '/').Split('/').LastOrDefault()?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name is "." or "..") name = "file";
+        var invalidCharacters = new HashSet<char>(Path.GetInvalidFileNameChars().Concat("<>:\"|?*"));
+        name = new string(name.Select(character =>
+            char.IsControl(character) || invalidCharacters.Contains(character) ? '_' : character).ToArray()).Trim('.', ' ');
+        if (string.IsNullOrWhiteSpace(name)) name = "file";
+        var extension = Path.GetExtension(name);
+        var stem = Path.GetFileNameWithoutExtension(name);
+        var uniqueName = name;
+        for (var suffix = 2; !usedNames.Add(uniqueName); suffix++)
+            uniqueName = $"{stem} ({suffix}){extension}";
+        return uniqueName;
     }
 
     private static bool HasValidSignature(string extension, byte[] header, int read) => extension.ToLowerInvariant() switch

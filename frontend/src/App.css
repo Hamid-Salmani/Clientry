@@ -415,6 +415,21 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .attention-activity-item small { overflow: hidden; color: #9da1ad; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .attention-activity-item time { flex: none; color: #a3a6af; font-size: 8px; }
 .attention-detail-panel .empty-state { min-height: 112px; }
+.file-header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.file-drop-zone { margin-top: 12px; border: 1px dashed #dfe1ea; border-radius: 7px; padding: 11px; color: #999daa; font-size: 8px; text-align: center; }
+.file-upload-statuses { display: grid; gap: 6px; margin-top: 9px; }
+.file-upload-status { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, .7fr) 32px; align-items: center; gap: 8px; color: #777b89; font-size: 8px; }
+.file-upload-status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-upload-status progress { width: 100%; height: 6px; accent-color: #7779d5; }
+.file-upload-status > small { color: #969aa6; text-align: right; }
+.file-upload-status.failed { grid-template-columns: 1fr; color: #b9625b; }
+.file-upload-status.failed strong { font-size: 8px; font-weight: 500; }
+.file-group + .file-group { margin-top: 14px; }
+.file-group > h3 { margin: 8px 0 4px; color: #898d9a; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; }
+.file-preview-dialog { width: min(850px, calc(100vw - 32px)); max-height: 90vh; overflow: auto; }
+.file-preview-dialog h2 { margin: 10px 38px 16px 0; color: #353947; font: 700 15px 'Manrope', sans-serif; overflow-wrap: anywhere; }
+.file-preview-dialog iframe { width: 100%; height: min(68vh, 680px); border: 1px solid #eceef3; border-radius: 6px; background: white; }
+.file-preview-dialog img { display: block; max-width: 100%; max-height: 68vh; margin: auto; object-fit: contain; }
 .request-form, .request-detail { max-width: 820px; padding: 22px; }
 .request-form { display: grid; gap: 16px; }
 .request-form > label, .request-add-files { display: grid; gap: 7px; color: #686c79; font-size: 10px; font-weight: 600; }
@@ -545,6 +560,9 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 :root[data-theme="dark"] .attention-section > .panel-heading h2, :root[data-theme="dark"] .attention-card > strong, :root[data-theme="dark"] .attention-activity-item strong { color: #e1e3ec; }
 :root[data-theme="dark"] .attention-card, :root[data-theme="dark"] .attention-activity-item { border-color: #383c4a; background: #20232f; }
 :root[data-theme="dark"] .attention-activity-item { border-top-color: #383c4a; }
+:root[data-theme="dark"] .file-drop-zone { border-color: #484c5a; color: #a3a8b7; }
+:root[data-theme="dark"] .file-group > h3, :root[data-theme="dark"] .file-upload-status { color: #a3a8b7; }
+:root[data-theme="dark"] .file-preview-dialog h2 { color: #e4e6ed; }
 :root[data-theme="dark"] .sidebar, :root[data-theme="dark"] .topbar, :root[data-theme="dark"] .panel, :root[data-theme="dark"] .stat-card, :root[data-theme="dark"] .project-row, :root[data-theme="dark"] .payment-modal, :root[data-theme="dark"] .create-project-form input, :root[data-theme="dark"] .create-project-form select, :root[data-theme="dark"] .create-project-form textarea, :root[data-theme="dark"] .login-page { background: #20232e; }
 :root[data-theme="dark"] .sidebar, :root[data-theme="dark"] .topbar, :root[data-theme="dark"] .panel, :root[data-theme="dark"] .stat-card, :root[data-theme="dark"] .workspace-switch, :root[data-theme="dark"] .profile, :root[data-theme="dark"] .project-row, :root[data-theme="dark"] .invoice-row, :root[data-theme="dark"] .invoice-table-row, :root[data-theme="dark"] .file-row, :root[data-theme="dark"] .milestone-list, :root[data-theme="dark"] .milestone, :root[data-theme="dark"] .comment-form, :root[data-theme="dark"] .full-panel { border-color: #303442; }
 :root[data-theme="dark"] .brand, :root[data-theme="dark"] h1, :root[data-theme="dark"] .panel-heading h2, :root[data-theme="dark"] .stat-card > strong, :root[data-theme="dark"] .project-info strong, :root[data-theme="dark"] .invoice-row-price > strong, :root[data-theme="dark"] .invoice-number strong, :root[data-theme="dark"] .invoice-table-row > strong, :root[data-theme="dark"] .client-details strong, :root[data-theme="dark"] .milestone-copy strong, :root[data-theme="dark"] .comment-body strong { color: #e4e6ed; }
