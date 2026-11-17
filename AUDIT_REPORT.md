@@ -68,7 +68,7 @@ Statuses are **PASS**, **FIXED**, or **NOT YET VERIFIED**. Items marked partial 
 | Client — work requests create/cancel/accept/decline/convert | NOT YET VERIFIED | — |
 | Client — needs-attention overview matches database | PARTIAL | The overview loads in the browser and is captured; direct data-to-database comparison remains pending. |
 | Client — image/PDF preview, drag/drop progress, zip | NOT YET VERIFIED | — |
-| Client — Stripe PaymentIntent, webhook, replay/amount/currency/payment_failed, paid receipt | PARTIAL | No Stripe key is available; PaymentIntent endpoint returns 503 as expected. Signed `payment_intent.succeeded` webhook passes; wrong amount returns 400; replay is idempotent; paid receipt returns a PDF. Currency mismatch and `payment_failed` remain unverified. |
+| Client — Stripe PaymentIntent, webhook, replay/amount/currency/payment_failed, paid receipt | PARTIAL | No Stripe key is available; PaymentIntent endpoint returns 503 as expected. `client-journey.spec.ts` verifies signed success, replay, wrong amount (400), and paid receipt. Fresh-DB HTTP checks verify an invalid signature returns 400 and a signed `payment_intent.payment_failed` returns 200 while leaving the invoice unpaid and adding no successful payment. Currency mismatch remains unverified. |
 | Client — Owner team invite/deactivate/billing; Member receives 403 | NOT YET VERIFIED | — |
 | Client — notifications, unread/live push/preferences/throttling | NOT YET VERIFIED | — |
 | Client — profile and server-side preferences | NOT YET VERIFIED | — |
@@ -95,7 +95,7 @@ The Swagger inventory contains **84 method/path operations across 65 paths**. Th
 6. PaymentIntent creation returns 503 because no Stripe secret is configured. A generated signed success webhook marks the invoice Paid; a wrong amount returns 400, replay does not duplicate payment, and receipt PDF downloads.
 7. Client B cannot see the journey's IDs in list endpoints and gets 404 for the project, file, and receipt.
 
-The Playwright screenshot is `docs/screenshots/e2e-client-paid-invoice.png`. The real Stripe gateway/card flow remains unavailable.
+The Playwright screenshot is `docs/screenshots/e2e-client-paid-invoice.png`. Additional fresh-database HTTP checks: malformed signature -> 400; signed `payment_intent.payment_failed` -> 200, with the sent invoice still unpaid and no success payment added. The real Stripe gateway/card flow remains unavailable.
 
 ## Phase 5 — UI quality sweep
 
@@ -129,11 +129,13 @@ The sweep does not yet cover every page's loading/empty/error states, all forms'
 | `npm audit --omit=dev` | PASS, 0 vulnerabilities |
 | `dotnet list backend/ClientHub.slnx package --vulnerable --include-transitive` | PASS, none reported |
 | `npm run test:e2e -- --workers=1` | PASS, 3 browser tests |
+| Fresh local HTTP batch: invalid Stripe signature and signed `payment_intent.payment_failed` | PASS, 400 / 200; invoice remained unpaid |
 | Docker Compose | NOT AVAILABLE, Docker CLI missing |
 
-## Known limitations / not yet verified
+## Not verified / known limitations
 
 - No real Stripe secret key or publishable key is available. The PaymentIntent/card gateway flow is not verified; the signed local webhook path is verified.
+- Stripe currency-mismatch rejection is not yet verified.
 - SMTP is verified through Mailpit, not an external provider.
 - Docker Compose could not run because Docker is not installed; the API/client/Mailpit stack was started locally.
-- Workflows and security properties explicitly labeled NOT YET VERIFIED above must not be interpreted as passing.
+- All Phase 2 items explicitly labeled NOT YET VERIFIED above, the complete route-by-route isolation matrix, SignalR group-join isolation, and all other security properties explicitly labeled not verified above must not be interpreted as passing.
