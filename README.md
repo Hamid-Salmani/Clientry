@@ -10,6 +10,7 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - Administrator client lifecycle management: search/paged client list, create/update, activation, client details, user status controls, and per-client invitations.
 - Project administration: searchable, filterable, sortable paged project lists; project edits and status/archive transitions; milestone CRUD, completion, ordering, and per-project activity history.
 - Project files can be uploaded, downloaded, renamed, and removed by their uploader or an administrator; project comments can be edited or removed by their author or an administrator, with activity and SignalR updates.
+- Invoice administration supports draft creation/editing/deletion, valid status transitions, verified-payment-only completion, PDF downloads, and CSV export.
 - React + TypeScript frontend for client and admin workspaces, project detail, conversations, files, invoices, and basic admin overview/client list.
 - Dockerfiles, Compose services, Mailpit, and GitHub Actions build/test workflow.
 

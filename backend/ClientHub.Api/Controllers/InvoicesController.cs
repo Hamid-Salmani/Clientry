@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Stripe;
+using System.Text;
 using DomainInvoice = ClientHub.Domain.Invoice;
 using DomainInvoiceLineItem = ClientHub.Domain.InvoiceLineItem;
 
@@ -38,18 +39,34 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         return File(content, "application/pdf", $"{invoice.Number}.pdf");
     }
 
+    [HttpGet("export.csv")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ExportCsv(CancellationToken cancellationToken)
+    {
+        var invoices = await db.Invoices.AsNoTracking().Include(x => x.Client).Include(x => x.Lines)
+            .OrderBy(x => x.Number).ToListAsync(cancellationToken);
+        var csv = new StringBuilder("Number,Client,Issue date,Due date,Status,Currency,Total\r\n");
+        foreach (var invoice in invoices)
+        {
+            csv.AppendJoin(',', new[]
+            {
+                Csv(invoice.Number),
+                Csv(invoice.Client?.CompanyName ?? string.Empty),
+                Csv(invoice.IssueDate.ToString("yyyy-MM-dd")),
+                Csv(invoice.DueDate.ToString("yyyy-MM-dd")),
+                Csv(invoice.Status.ToString()),
+                Csv(invoice.Currency),
+                Csv(invoice.Total.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
+            }).Append("\r\n");
+        }
+        return File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv; charset=utf-8", "invoices.csv");
+    }
+
     [HttpPost]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Create(CreateInvoiceRequest request, CancellationToken cancellationToken)
     {
-        if (request.Lines is null || request.Lines.Count == 0 || request.Lines.Count > 50 ||
-            request.Lines.Any(x => string.IsNullOrWhiteSpace(x.Description) || x.Description.Length > 240 ||
-                x.Quantity <= 0 || x.UnitPrice < 0) || string.IsNullOrWhiteSpace(request.Currency) ||
-            request.Currency.Length != 3)
-            return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
-            {
-                ["invoice"] = ["Add valid invoice line items and a three-letter currency code."]
-            }));
+        if (!IsValidInvoice(request)) return InvalidInvoice();
         if (!await db.Clients.AnyAsync(x => x.Id == request.ClientId, cancellationToken)) return NotFound();
         if (request.ProjectId.HasValue &&
             !await db.Projects.AnyAsync(x => x.Id == request.ProjectId && x.ClientId == request.ClientId, cancellationToken))
@@ -57,6 +74,8 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
 
         if (!string.Equals(request.Currency, "USD", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { message = "Only USD invoices are currently supported." });
+        if (request.DueDate < DateOnly.FromDateTime(DateTime.UtcNow))
+            return BadRequest(new { message = "Due date cannot be before the issue date." });
         var invoice = new DomainInvoice
         {
             ClientId = request.ClientId,
@@ -65,14 +84,53 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
             IssueDate = DateOnly.FromDateTime(DateTime.UtcNow),
             DueDate = request.DueDate,
             Currency = request.Currency.ToUpperInvariant(),
-            Lines = request.Lines.Select(x => new DomainInvoiceLineItem
-            {
-                Description = x.Description.Trim(), Quantity = x.Quantity, UnitPrice = x.UnitPrice
-            }).ToList()
+            Lines = CreateLines(request.Lines)
         };
         db.Invoices.Add(invoice);
         await db.SaveChangesAsync(cancellationToken);
         return CreatedAtAction(nameof(List), new { id = invoice.Id }, new { invoice.Id, invoice.Number });
+    }
+
+    [HttpPut("{invoiceId:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Update(Guid invoiceId, CreateInvoiceRequest request, CancellationToken cancellationToken)
+    {
+        if (!IsValidInvoice(request)) return InvalidInvoice();
+        var invoice = await db.Invoices.Include(x => x.Lines)
+            .SingleOrDefaultAsync(x => x.Id == invoiceId, cancellationToken);
+        if (invoice is null) return NotFound();
+        if (invoice.Status != InvoiceStatus.Draft)
+            return Conflict(new { message = "Only draft invoices can be edited." });
+        if (!await db.Clients.AnyAsync(x => x.Id == request.ClientId, cancellationToken)) return NotFound();
+        if (request.ProjectId.HasValue &&
+            !await db.Projects.AnyAsync(x => x.Id == request.ProjectId && x.ClientId == request.ClientId, cancellationToken))
+            return NotFound();
+        if (!string.Equals(request.Currency, "USD", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Only USD invoices are currently supported." });
+        if (request.DueDate < invoice.IssueDate)
+            return BadRequest(new { message = "Due date cannot be before the issue date." });
+
+        db.InvoiceLineItems.RemoveRange(invoice.Lines);
+        invoice.ClientId = request.ClientId;
+        invoice.ProjectId = request.ProjectId;
+        invoice.DueDate = request.DueDate;
+        invoice.Currency = request.Currency.ToUpperInvariant();
+        invoice.Lines = CreateLines(request.Lines);
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("{invoiceId:guid}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Delete(Guid invoiceId, CancellationToken cancellationToken)
+    {
+        var invoice = await db.Invoices.SingleOrDefaultAsync(x => x.Id == invoiceId, cancellationToken);
+        if (invoice is null) return NotFound();
+        if (invoice.Status != InvoiceStatus.Draft)
+            return Conflict(new { message = "Only draft invoices can be deleted." });
+        db.Invoices.Remove(invoice);
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
     }
 
     [HttpPost("{invoiceId:guid}/send")]
@@ -84,6 +142,23 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         if (!InvoiceRules.CanTransition(invoice.Status, InvoiceStatus.Sent))
             return Conflict(new { message = "This invoice cannot be sent in its current state." });
         invoice.Status = InvoiceStatus.Sent;
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPatch("{invoiceId:guid}/status")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateStatus(Guid invoiceId, UpdateInvoiceStatusRequest request, CancellationToken cancellationToken)
+    {
+        if (!Enum.TryParse<InvoiceStatus>(request.Status, true, out var nextStatus) ||
+            !Enum.IsDefined(nextStatus) || nextStatus == InvoiceStatus.Paid)
+            return BadRequest(new { message = "Choose a valid invoice status; Paid is set only by verified payment." });
+        var invoice = await db.Invoices.SingleOrDefaultAsync(x => x.Id == invoiceId, cancellationToken);
+        if (invoice is null) return NotFound();
+        if (!InvoiceRules.CanTransition(invoice.Status, nextStatus))
+            return Conflict(new { message = $"An invoice cannot move from {invoice.Status} to {nextStatus}." });
+        if (invoice.Status == nextStatus) return NoContent();
+        invoice.Status = nextStatus;
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -109,6 +184,33 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         return Ok(new { intent.ClientSecret });
     }
 
+    private static bool IsValidInvoice(CreateInvoiceRequest request) =>
+        request.Lines is { Count: > 0 and <= 50 } &&
+        request.Lines.All(x => x is not null && !string.IsNullOrWhiteSpace(x.Description) && x.Description.Length <= 240 &&
+            x.Quantity > 0 && x.Quantity <= 1_000_000 && x.UnitPrice >= 0 && x.UnitPrice <= 1_000_000_000) &&
+        !string.IsNullOrWhiteSpace(request.Currency) && request.Currency.Length == 3;
+
+    private static List<DomainInvoiceLineItem> CreateLines(IEnumerable<InvoiceLineRequest> lines) =>
+        lines.Select(x => new DomainInvoiceLineItem
+        {
+            Description = x.Description.Trim(), Quantity = x.Quantity, UnitPrice = x.UnitPrice
+        }).ToList();
+
+    private IActionResult InvalidInvoice() =>
+        ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
+        {
+            ["invoice"] = ["Add valid invoice line items and a three-letter currency code."]
+        }));
+
+    private static string Csv(string value)
+    {
+        var trimmed = value.TrimStart();
+        if (trimmed.Length > 0 && trimmed[0] is '=' or '+' or '-' or '@')
+            value = $"'{value}";
+        return $"\"{value.Replace("\"", "\"\"")}\"";
+    }
+
     public sealed record CreateInvoiceRequest(Guid ClientId, Guid? ProjectId, DateOnly DueDate, string Currency, List<InvoiceLineRequest> Lines);
+    public sealed record UpdateInvoiceStatusRequest(string Status);
     public sealed record InvoiceLineRequest(string Description, decimal Quantity, decimal UnitPrice);
 }
