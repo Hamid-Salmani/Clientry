@@ -918,7 +918,7 @@ function Account({ user, workspaceName, admin, onBilling, onSaveProfile, onChang
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">YOUR PROFILE</div><h1>Account<span className="heading-period">.</span></h1><p>Your account and workspace details.</p></div></div>
     {error && <div className="alert" role="alert">{error}</div>}
-    {notice && <p className="billing-saved" role="status">{notice}</p>}
+    {notice && <Toast message={notice} />}
     <section className="panel account-panel">
       <div className="account-identity"><span className="account-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><div><h2>{user.name}</h2><p>{user.role}</p></div></div>
       <div className="account-detail"><span>Account name</span><strong>{user.name}</strong></div>
@@ -992,7 +992,7 @@ function ClientBilling({ token }: { token: string }) {
         <label>Tax ID<input value={taxId} onChange={(event) => setTaxId(event.target.value)} maxLength={80} readOnly={!billingQuery.data?.canEdit} /></label>
         <label>Billing email(s)<input type="text" value={billingEmails} onChange={(event) => setBillingEmails(event.target.value)} maxLength={500} placeholder="billing@example.com; finance@example.com" readOnly={!billingQuery.data?.canEdit} /></label>
         <label>Billing address<textarea value={billingAddress} onChange={(event) => setBillingAddress(event.target.value)} maxLength={1000} rows={4} readOnly={!billingQuery.data?.canEdit} /></label>
-        {saved && <p className="billing-saved" role="status">Billing details saved.</p>}
+        {saved && <Toast message="Billing details saved." />}
         {!billingQuery.data?.canEdit && <p className="request-file-hint">Only the client owner can change billing details.</p>}
         {billingQuery.data?.canEdit && <div className="request-form-actions"><button className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save billing details'}</button></div>}
       </form>}
@@ -1045,7 +1045,7 @@ function ClientTeam({ token }: { token: string }) {
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">CLIENT WORKSPACE</div><h1>Team<span className="heading-period">.</span></h1><p>Invite colleagues and manage access to your shared workspace.</p></div></div>
     {error && <div className="alert" role="alert">{error}</div>}
-    {notice && <p className="billing-saved" role="status">{notice}</p>}
+    {notice && <Toast message={notice} />}
     {teamQuery.isError && <div className="alert" role="alert">{teamQuery.error instanceof Error ? teamQuery.error.message : 'Unable to load your team.'}</div>}
     <div className="team-layout">
       <form className="panel request-form team-invite-form" onSubmit={(event) => void invite(event)}>
@@ -2060,6 +2060,19 @@ function InvoiceRow({ invoice }: { invoice: Invoice }) {
 
 function EmptyState({ title, text }: { title: string; text: string }) {
   return <div className="empty-state"><div className="empty-symbol">✳</div><strong>{title}</strong><span>{text}</span></div>
+}
+
+function Toast({ message }: { message: string }) {
+  const [visible, setVisible] = useState(true)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(false), 4000)
+    return () => window.clearTimeout(timer)
+  }, [message])
+  if (!visible) return null
+  return <div className="toast" role="status" aria-live="polite">
+    <span>{message}</span>
+    <button type="button" onClick={() => setVisible(false)} aria-label="Dismiss notification">×</button>
+  </div>
 }
 
 function money(value: number) {
