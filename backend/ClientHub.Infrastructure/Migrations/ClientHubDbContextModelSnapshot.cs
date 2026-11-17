@@ -45,7 +45,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ActivityLogs");
+                    b.ToTable("ActivityLogs", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Client", b =>
@@ -79,7 +79,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Clients");
+                    b.ToTable("Clients", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Comment", b =>
@@ -110,7 +110,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("Comments");
+                    b.ToTable("Comments", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Invitation", b =>
@@ -148,7 +148,7 @@ namespace ClientHub.Infrastructure.Migrations
                     b.HasIndex("TokenHash")
                         .IsUnique();
 
-                    b.ToTable("Invitations");
+                    b.ToTable("Invitations", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Invoice", b =>
@@ -199,7 +199,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ClientId");
 
-                    b.ToTable("Invoices");
+                    b.ToTable("Invoices", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.InvoiceLineItem", b =>
@@ -227,7 +227,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("InvoiceId");
 
-                    b.ToTable("InvoiceLineItems");
+                    b.ToTable("InvoiceLineItems", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Milestone", b =>
@@ -274,7 +274,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("Milestones");
+                    b.ToTable("Milestones", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Notification", b =>
@@ -289,6 +289,9 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<bool>("IsRead")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Link")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -302,7 +305,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Notifications");
+                    b.ToTable("Notifications", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.PasswordResetToken", b =>
@@ -331,7 +334,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("PasswordResetTokens");
+                    b.ToTable("PasswordResetTokens", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Payment", b =>
@@ -364,7 +367,7 @@ namespace ClientHub.Infrastructure.Migrations
                     b.HasIndex("StripePaymentIntentId")
                         .IsUnique();
 
-                    b.ToTable("Payments");
+                    b.ToTable("Payments", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Project", b =>
@@ -397,7 +400,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ClientId");
 
-                    b.ToTable("Projects");
+                    b.ToTable("Projects", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.ProjectFile", b =>
@@ -437,7 +440,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("ProjectFiles");
+                    b.ToTable("ProjectFiles", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.ProjectRequest", b =>
@@ -482,7 +485,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ClientId", "CreatedAt");
 
-                    b.ToTable("ProjectRequests");
+                    b.ToTable("ProjectRequests", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.ProjectRequestAttachment", b =>
@@ -519,7 +522,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ProjectRequestId");
 
-                    b.ToTable("ProjectRequestAttachments");
+                    b.ToTable("ProjectRequestAttachments", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.RefreshToken", b =>
@@ -554,7 +557,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("RefreshTokens");
+                    b.ToTable("RefreshTokens", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.User", b =>
@@ -605,7 +608,7 @@ namespace ClientHub.Infrastructure.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.UserNotificationPreference", b =>
@@ -613,15 +616,55 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("Approvals")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("Comments")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailApprovals")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailComments")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailInvoiceReminders")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailRequestUpdates")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailWorkspaceUpdates")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
                     b.Property<bool>("InvoiceReminders")
                         .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RequestUpdates")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("WorkspaceUpdates")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("UserId");
 
-                    b.ToTable("NotificationPreferences");
+                    b.ToTable("NotificationPreferences", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.WorkspaceSettings", b =>
@@ -643,7 +686,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("WorkspaceSettings");
+                    b.ToTable("WorkspaceSettings", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Comment", b =>

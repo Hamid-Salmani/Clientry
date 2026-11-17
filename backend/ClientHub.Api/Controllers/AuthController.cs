@@ -200,6 +200,17 @@ public sealed class AuthController(
         return NoContent();
     }
 
+    [HttpPost("logout-all")]
+    [Authorize]
+    public async Task<IActionResult> LogoutAll(CancellationToken cancellationToken)
+    {
+        var user = await GetCurrentUserAsync(cancellationToken);
+        if (user is null) return Unauthorized();
+        await RevokeAllRefreshTokensAsync(user.Id, DateTime.UtcNow, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("change-password")]
     [Authorize]
     [EnableRateLimiting("auth")]
@@ -292,7 +303,7 @@ public sealed class AuthController(
         if (user is null) return Unauthorized();
         user.FullName = fullName;
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(new { user.Id, user.FullName, user.Email, role = user.Role.ToString() });
+        return Ok(new { user.Id, user.FullName, user.Email, role = user.Role.ToString(), clientRole = user.ClientRole.ToString() });
     }
 
     [HttpGet("me")]
@@ -310,7 +321,7 @@ public sealed class AuthController(
         return Ok(new
         {
             id = User.FindFirstValue(ClaimTypes.NameIdentifier),
-            name = User.Identity?.Name,
+            name = user?.FullName ?? User.Identity?.Name,
             role = User.FindFirstValue(ClaimTypes.Role),
             clientRole = user?.ClientRole.ToString(),
             workspaceName = clientName ?? "Client workspace",

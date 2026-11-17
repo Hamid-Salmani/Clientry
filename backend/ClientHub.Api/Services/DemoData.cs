@@ -157,7 +157,7 @@ public static class DemoData
                     InvoiceId = invoiceB.Id, StripePaymentIntentId = "demo_payment_intent",
                     Amount = 1440, Status = "Succeeded", PaidAt = new DateTime(2026, 11, 3, 10, 0, 0, DateTimeKind.Utc)
                 },
-                new Notification { UserId = userA.Id, Type = "project", Message = "Visual directions are ready for review." },
+                new Notification { UserId = userA.Id, Type = "project", Message = "Visual directions are ready for review.", Link = $"/projects/{projectA.Id}" },
                 new ActivityLog { ClientId = seedClientA.Id, ProjectId = projectA.Id, ActorId = admin.Id, Action = "Project created", Metadata = "Brand identity refresh" });
 
             var sampleContent = Encoding.UTF8.GetBytes("ClientHub shared project brief\r\nA short sample file for the demo workspace.\r\n");

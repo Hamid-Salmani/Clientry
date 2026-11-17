@@ -68,8 +68,11 @@ type Metrics = {
 }
 type Comment = { id: string; authorId: string; body: string; createdAt: string; author: string }
 type ProjectFile = { id: string; fileName: string; contentType: string; size: number; uploadedAt: string; uploadedById: string; uploadedByRole?: string }
-type NotificationItem = { id: string; type: string; message: string; isRead: boolean; createdAt: string }
-type NotificationPreferences = { workspaceUpdates: boolean; invoiceReminders: boolean }
+type NotificationItem = { id: string; type: string; message: string; link?: string; isRead: boolean; createdAt: string }
+type NotificationPreferences = {
+  workspaceUpdates: boolean; invoiceReminders: boolean; comments: boolean; approvals: boolean; requestUpdates: boolean
+  emailWorkspaceUpdates: boolean; emailComments: boolean; emailApprovals: boolean; emailInvoiceReminders: boolean; emailRequestUpdates: boolean
+}
 type AdminWorkspaceSettings = { name: string; supportEmail: string }
 
 const apiBase = import.meta.env.VITE_API_URL ?? ''
@@ -126,8 +129,10 @@ function App() {
   const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([])
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
   const [notificationLoading, setNotificationLoading] = useState(false)
-  const [workspaceUpdates, setWorkspaceUpdates] = useState(true)
-  const [invoiceReminders, setInvoiceReminders] = useState(true)
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>({
+    workspaceUpdates: true, invoiceReminders: true, comments: true, approvals: true, requestUpdates: true,
+    emailWorkspaceUpdates: true, emailComments: true, emailApprovals: true, emailInvoiceReminders: true, emailRequestUpdates: true,
+  })
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('clientry-theme')
     return savedTheme === 'light' || savedTheme === 'dark'
@@ -156,6 +161,7 @@ function App() {
   const location = useLocation()
   const projectRouteId = location.pathname.match(/^\/projects\/([0-9a-f-]+)$/i)?.[1]
   const activePage = location.pathname.startsWith('/team') ? (user?.clientRole === 'Owner' ? 'Team' : 'Overview')
+    : location.pathname.startsWith('/notifications') ? 'Notifications'
     : location.pathname.startsWith('/clients') ? 'Clients'
     : location.pathname.startsWith('/approvals') ? 'Approvals'
     : location.pathname.startsWith('/requests') ? 'Requests'
@@ -295,8 +301,7 @@ function App() {
 
   useEffect(() => {
     if (preferencesQuery.data) {
-      setWorkspaceUpdates(preferencesQuery.data.workspaceUpdates)
-      setInvoiceReminders(preferencesQuery.data.invoiceReminders)
+      setNotificationPreferences(preferencesQuery.data)
     }
     if (preferencesQuery.error)
       setError(preferencesQuery.error instanceof Error ? preferencesQuery.error.message : 'Unable to load notification preferences.')
@@ -355,6 +360,7 @@ function App() {
       await request<void>(`/notifications/${notificationId}/read`, token, { method: 'PATCH' })
       setNotificationItems((items) => items.map((item) => item.id === notificationId ? { ...item, isRead: true } : item))
       if (wasUnread) setUnreadNotificationCount((count) => Math.max(0, count - 1))
+      await queryClient.invalidateQueries({ queryKey: ['notifications', token] })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to update notification.')
     }
@@ -365,19 +371,48 @@ function App() {
       await request<void>('/notifications/read-all', token, { method: 'POST' })
       setNotificationItems((items) => items.map((item) => ({ ...item, isRead: true })))
       setUnreadNotificationCount(0)
+      await queryClient.invalidateQueries({ queryKey: ['notifications', token] })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to update notifications.')
     }
   }
 
+  async function openNotification(item: NotificationItem) {
+    await markNotificationRead(item.id)
+    if (!item.isRead && !notificationItems.some((notification) => notification.id === item.id && !notification.isRead))
+      setUnreadNotificationCount((count) => Math.max(0, count - 1))
+    setOpenPopover(null)
+    if (item.link?.startsWith('/') && !item.link.startsWith('//')) routerNavigate(item.link)
+  }
+
   async function saveNotificationPreferences(next: NotificationPreferences) {
     try {
       await request<void>('/notifications/preferences', token, { method: 'PUT', body: JSON.stringify(next) })
-      setWorkspaceUpdates(next.workspaceUpdates)
-      setInvoiceReminders(next.invoiceReminders)
+      setNotificationPreferences(next)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to save notification preferences.')
     }
+  }
+
+  async function saveProfileName(fullName: string) {
+    const updated = await request<{ fullName: string }>('/auth/profile', token, {
+      method: 'PUT', body: JSON.stringify({ fullName }),
+    })
+    setUser((current) => current ? { ...current, name: updated.fullName } : current)
+    await queryClient.invalidateQueries({ queryKey: ['profile', token] })
+  }
+
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const result = await request<{ accessToken: string }>('/auth/change-password', token, {
+      method: 'POST', body: JSON.stringify({ currentPassword, newPassword }),
+    })
+    sessionStorage.setItem('clienthub-token', result.accessToken)
+    setToken(result.accessToken)
+  }
+
+  async function signOutAllDevices() {
+    await request<void>('/auth/logout-all', token, { method: 'POST' })
+    signOut()
   }
 
   async function saveWorkspaceSettings(name: string, supportEmail: string) {
@@ -581,7 +616,7 @@ function App() {
               <label className="search-field"><Icon name="search" /><input ref={searchInputRef} value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setOpenPopover(null) }} placeholder="Search projects, invoices, clients..." /><button className="icon-button" onClick={() => setOpenPopover(null)} aria-label="Close search"><Icon name="close" /></button></label>
               <SearchResults term={searchTerm} projects={projects} invoices={invoices} clients={admin ? clients : []} onOpenProject={openProject} onOpenInvoices={() => navigateTo('Invoices')} onOpenClients={() => navigateTo('Clients')} />
             </div>}
-            {openPopover === 'notifications' && <NotificationsPopover items={notificationItems} unreadCount={unreadNotificationCount} loading={notificationLoading} onMarkRead={(id) => void markNotificationRead(id)} onMarkAllRead={() => void markAllNotificationsRead()} />}
+            {openPopover === 'notifications' && <NotificationsPopover items={notificationItems} unreadCount={unreadNotificationCount} loading={notificationLoading} onOpenNotification={(item) => void openNotification(item)} onMarkAllRead={() => void markAllNotificationsRead()} onViewAll={() => { setOpenPopover(null); routerNavigate('/notifications') }} />}
           </div>
         </header>
 
@@ -605,12 +640,14 @@ function App() {
             <Invoices invoices={invoices} token={token} admin={Boolean(admin)} clients={clients} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           ) : activePage === 'Team' ? (
             <ClientTeam token={token} />
+          ) : activePage === 'Notifications' ? (
+            <NotificationsInbox token={token} onOpenNotification={(item) => void openNotification(item)} onMarkAllRead={() => void markAllNotificationsRead()} />
           ) : activePage === 'Settings' ? (
-            <Settings key={`${workspaceSettings.name}:${workspaceSettings.supportEmail}`} workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
+            <Settings key={`${workspaceSettings.name}:${workspaceSettings.supportEmail}`} workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} preferences={notificationPreferences} onPreferenceChange={(key, value) => void saveNotificationPreferences({ ...notificationPreferences, [key]: value })} />
           ) : activePage === 'Account' ? (
             location.pathname === '/account/billing'
               ? <ClientBilling token={token} />
-              : <Account user={user} workspaceName={workspaceName} admin={Boolean(admin)} onBilling={() => routerNavigate('/account/billing')} onSignOut={signOut} />
+              : <Account user={user} workspaceName={workspaceName} admin={Boolean(admin)} onBilling={() => routerNavigate('/account/billing')} onSaveProfile={saveProfileName} onChangePassword={changePassword} onSignOut={signOut} onSignOutAll={signOutAllDevices} />
           ) : (
             <Clients clients={clients} token={token} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           )}
@@ -678,34 +715,67 @@ function SearchResults({ term, projects, invoices, clients, onOpenProject, onOpe
     : <p className="popover-hint">No matching projects, invoices, or clients.</p>
 }
 
-function NotificationsPopover({ items, unreadCount, loading, onMarkRead, onMarkAllRead }: {
+function NotificationsPopover({ items, unreadCount, loading, onOpenNotification, onMarkAllRead, onViewAll }: {
   items: NotificationItem[]
   unreadCount: number
   loading: boolean
-  onMarkRead: (id: string) => void
+  onOpenNotification: (item: NotificationItem) => void
   onMarkAllRead: () => void
+  onViewAll: () => void
 }) {
   return <div className="popover notifications-popover" id="workspace-notifications-popover" role="dialog" aria-label="Workspace notifications">
     <div className="popover-title"><div><strong>Notifications</strong><span>Your workspace updates</span></div><span className="notification-count">{unreadCount}</span></div>
     {loading ? <p className="popover-hint">Loading notifications...</p> :
-      items.length ? <div className="notification-list">{items.map((item) => <button key={item.id} className={`notification-item${item.isRead ? '' : ' unread'}`} onClick={() => onMarkRead(item.id)}>
+      items.length ? <div className="notification-list">{items.map((item) => <button key={item.id} className={`notification-item${item.isRead ? '' : ' unread'}`} onClick={() => onOpenNotification(item)}>
         <span className="notification-mark"><Icon name="bell" /></span><span className="notification-copy"><strong>{item.type}</strong><span>{item.message}</span><small>{relativeDate(item.createdAt)}</small></span>
       </button>)}</div> : <p className="popover-hint">You’re all caught up. New workspace updates will appear here.</p>}
     {unreadCount > 0 && <button className="popover-link" onClick={onMarkAllRead}>Mark all as read</button>}
+    <button className="popover-link" onClick={onViewAll}>View all notifications <Icon name="arrow" /></button>
   </div>
 }
 
-function Settings({ workspaceName, admin, workspaceSettings, onSaveWorkspaceSettings, lightMode, onLightModeChange, workspaceUpdates, invoiceReminders, onWorkspaceUpdatesChange, onInvoiceRemindersChange }: {
+function NotificationsInbox({ token, onOpenNotification, onMarkAllRead }: {
+  token: string
+  onOpenNotification: (item: NotificationItem) => void
+  onMarkAllRead: () => void
+}) {
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const notificationsQuery = useQuery({
+    queryKey: ['notifications', token, unreadOnly],
+    queryFn: () => request<{ items: NotificationItem[]; total: number; unreadCount: number }>(
+      `/notifications?page=1&pageSize=100${unreadOnly ? '&unreadOnly=true' : ''}`, token),
+    enabled: Boolean(token),
+  })
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>Notifications<span className="heading-period">.</span></h1><p>Updates about projects, approvals, invoices, and requests.</p></div>
+      {(notificationsQuery.data?.unreadCount ?? 0) > 0 && <button className="cancel-button" onClick={onMarkAllRead}>Mark all as read</button>}</div>
+    <section className="panel full-panel notifications-page-panel">
+      <div className="notification-filters" role="group" aria-label="Notification filter">
+        <button className={!unreadOnly ? 'active' : ''} aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)}>All</button>
+        <button className={unreadOnly ? 'active' : ''} aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)}>Unread</button>
+        <span>{notificationsQuery.data?.unreadCount ?? 0} unread</span>
+      </div>
+      {notificationsQuery.isLoading ? <div className="loading-bar" role="status" aria-label="Loading notifications" /> :
+        notificationsQuery.isError ? <div className="alert" role="alert">{notificationsQuery.error instanceof Error ? notificationsQuery.error.message : 'Unable to load notifications.'}</div> :
+          notificationsQuery.data?.items.length ? <div className="notification-page-list">{notificationsQuery.data.items.map((item) => <button key={item.id} className={`notification-page-item${item.isRead ? '' : ' unread'}`} onClick={() => onOpenNotification(item)}>
+            <span className="notification-mark"><Icon name="bell" /></span>
+            <span className="notification-copy"><strong>{item.type}</strong><span>{item.message}</span><small>{relativeDate(item.createdAt)}</small></span>
+            {!item.isRead && <i aria-label="Unread" />}
+          </button>)}</div> :
+            <EmptyState title={unreadOnly ? 'You’re all caught up' : 'No notifications yet'} text={unreadOnly ? 'New unread updates will appear here.' : 'Project and workspace updates will appear here.'} />}
+    </section>
+  </div>
+}
+
+function Settings({ workspaceName, admin, workspaceSettings, onSaveWorkspaceSettings, lightMode, onLightModeChange, preferences, onPreferenceChange }: {
   workspaceName: string
   admin: boolean
   workspaceSettings: AdminWorkspaceSettings
   onSaveWorkspaceSettings: (name: string, supportEmail: string) => void
   lightMode: boolean
   onLightModeChange: (enabled: boolean) => void
-  workspaceUpdates: boolean
-  invoiceReminders: boolean
-  onWorkspaceUpdatesChange: (enabled: boolean) => void
-  onInvoiceRemindersChange: (enabled: boolean) => void
+  preferences: NotificationPreferences
+  onPreferenceChange: (key: keyof NotificationPreferences, enabled: boolean) => void
 }) {
   const [name, setName] = useState(workspaceSettings.name)
   const [supportEmail, setSupportEmail] = useState(workspaceSettings.supportEmail)
@@ -714,8 +784,17 @@ function Settings({ workspaceName, admin, workspaceSettings, onSaveWorkspaceSett
     <section className="panel settings-panel">
       <div className="panel-heading"><div><h2>Appearance & notifications</h2><p>Notification preferences are saved to your account.</p></div><span className="settings-badge">PERSONAL</span></div>
       <PreferenceToggle title="Light mode" description="Use a bright color palette throughout the workspace." checked={lightMode} onChange={onLightModeChange} />
-      <PreferenceToggle title="Workspace updates" description="Show project and activity updates in your notification menu." checked={workspaceUpdates} onChange={onWorkspaceUpdatesChange} />
-      <PreferenceToggle title="Invoice reminders" description="Keep upcoming and overdue invoices on your radar." checked={invoiceReminders} onChange={onInvoiceRemindersChange} />
+      <PreferenceToggle title="Project updates" description="Show project and activity updates in your notification menu." checked={preferences.workspaceUpdates} onChange={(value) => onPreferenceChange('workspaceUpdates', value)} />
+      <PreferenceToggle title="Comment updates" description="Notify you when comments are added, edited, or removed." checked={preferences.comments} onChange={(value) => onPreferenceChange('comments', value)} />
+      <PreferenceToggle title="Approval updates" description="Notify you when a milestone needs your decision." checked={preferences.approvals} onChange={(value) => onPreferenceChange('approvals', value)} />
+      <PreferenceToggle title="Invoice reminders" description="Keep invoice and payment updates on your radar." checked={preferences.invoiceReminders} onChange={(value) => onPreferenceChange('invoiceReminders', value)} />
+      <PreferenceToggle title="Request updates" description="Notify you when your work requests change status." checked={preferences.requestUpdates} onChange={(value) => onPreferenceChange('requestUpdates', value)} />
+      <div className="settings-email-heading"><strong>Email notifications</strong><span>Choose which updates may also be sent by email.</span></div>
+      <PreferenceToggle title="Project update emails" description="Email project and workspace updates." checked={preferences.emailWorkspaceUpdates} onChange={(value) => onPreferenceChange('emailWorkspaceUpdates', value)} />
+      <PreferenceToggle title="Comment emails" description="Email new project comments." checked={preferences.emailComments} onChange={(value) => onPreferenceChange('emailComments', value)} />
+      <PreferenceToggle title="Approval emails" description="Email approval requests and decisions." checked={preferences.emailApprovals} onChange={(value) => onPreferenceChange('emailApprovals', value)} />
+      <PreferenceToggle title="Invoice emails" description="Email invoice and payment updates." checked={preferences.emailInvoiceReminders} onChange={(value) => onPreferenceChange('emailInvoiceReminders', value)} />
+      <PreferenceToggle title="Request emails" description="Email changes to your work requests." checked={preferences.emailRequestUpdates} onChange={(value) => onPreferenceChange('emailRequestUpdates', value)} />
     </section>
     {admin && <form className="panel settings-panel workspace-settings-form" onSubmit={(event) => { event.preventDefault(); onSaveWorkspaceSettings(name, supportEmail) }}>
       <div className="panel-heading"><div><h2>Workspace details</h2><p>These details are shared across your client workspace.</p></div><span className="settings-badge">ADMIN</span></div>
@@ -736,18 +815,63 @@ function PreferenceToggle({ title, description, checked, onChange }: {
   return <label className="preference-row"><span><strong>{title}</strong><small>{description}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-track" aria-hidden="true" /></label>
 }
 
-function Account({ user, workspaceName, admin, onBilling, onSignOut }: {
-  user: User; workspaceName: string; admin: boolean; onBilling: () => void; onSignOut: () => void
+function Account({ user, workspaceName, admin, onBilling, onSaveProfile, onChangePassword, onSignOut, onSignOutAll }: {
+  user: User; workspaceName: string; admin: boolean; onBilling: () => void
+  onSaveProfile: (fullName: string) => Promise<void>
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>
+  onSignOut: () => void
+  onSignOutAll: () => Promise<void>
 }) {
+  const [fullName, setFullName] = useState(user.name)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  async function saveProfile(event: FormEvent) {
+    event.preventDefault(); setBusy('profile'); setError(''); setNotice('')
+    try { await onSaveProfile(fullName.trim()); setNotice('Profile updated.') }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to update your profile.') }
+    finally { setBusy('') }
+  }
+  async function savePassword(event: FormEvent) {
+    event.preventDefault(); setBusy('password'); setError(''); setNotice('')
+    try {
+      await onChangePassword(currentPassword, newPassword)
+      setCurrentPassword(''); setNewPassword(''); setNotice('Password changed. Other devices have been signed out.')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to change your password.') }
+    finally { setBusy('') }
+  }
+  async function signOutEverywhere() {
+    setBusy('signout'); setError('')
+    try { await onSignOutAll() }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to sign out other devices.'); setBusy('') }
+  }
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">YOUR PROFILE</div><h1>Account<span className="heading-period">.</span></h1><p>Your account and workspace details.</p></div></div>
+    {error && <div className="alert" role="alert">{error}</div>}
+    {notice && <p className="billing-saved" role="status">{notice}</p>}
     <section className="panel account-panel">
       <div className="account-identity"><span className="account-avatar">{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</span><div><h2>{user.name}</h2><p>{user.role}</p></div></div>
       <div className="account-detail"><span>Account name</span><strong>{user.name}</strong></div>
       <div className="account-detail"><span>Role</span><strong>{user.role === 'Admin' ? 'Agency admin' : `Client ${user.clientRole ?? 'Member'}`}</strong></div>
       <div className="account-detail"><span>Workspace</span><strong>{workspaceName}</strong></div>
+      <form className="account-form" onSubmit={(event) => void saveProfile(event)}>
+        <h3>Edit profile</h3>
+        <label>Full name<input value={fullName} onChange={(event) => setFullName(event.target.value)} maxLength={120} required /></label>
+        <button className="primary-button" disabled={Boolean(busy)}>{busy === 'profile' ? 'Saving…' : 'Save profile'}</button>
+      </form>
+      <form className="account-form" onSubmit={(event) => void savePassword(event)}>
+        <h3>Change password</h3>
+        <label>Current password<input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label>
+        <label>New password<input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label>
+        <button className="primary-button" disabled={Boolean(busy)}>{busy === 'password' ? 'Updating…' : 'Change password'}</button>
+      </form>
       {!admin && <button className="cancel-button account-signout" onClick={onBilling}>Billing details <Icon name="arrow" /></button>}
-      <button className="cancel-button account-signout" onClick={onSignOut}><Icon name="logout" /> Sign out</button>
+      <div className="account-session-actions">
+        <button className="cancel-button account-signout" onClick={onSignOut} disabled={Boolean(busy)}><Icon name="logout" /> Sign out</button>
+        <button className="cancel-button account-signout" onClick={() => void signOutEverywhere()} disabled={Boolean(busy)}>{busy === 'signout' ? 'Signing out…' : 'Sign out of all devices'}</button>
+      </div>
     </section>
   </div>
 }

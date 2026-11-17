@@ -46,6 +46,14 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
         modelBuilder.Entity<PasswordResetToken>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<UserNotificationPreference>().HasKey(x => x.UserId);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.Comments).HasDefaultValue(true);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.Approvals).HasDefaultValue(true);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.RequestUpdates).HasDefaultValue(true);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.EmailWorkspaceUpdates).HasDefaultValue(true);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.EmailComments).HasDefaultValue(true);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.EmailApprovals).HasDefaultValue(true);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.EmailInvoiceReminders).HasDefaultValue(true);
+        modelBuilder.Entity<UserNotificationPreference>().Property(x => x.EmailRequestUpdates).HasDefaultValue(true);
         modelBuilder.Entity<UserNotificationPreference>().HasOne(x => x.User).WithOne(x => x.NotificationPreference)
             .HasForeignKey<UserNotificationPreference>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<User>().HasQueryFilter(x =>

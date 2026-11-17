@@ -88,7 +88,7 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             ProjectId = projectId, ClientId = project.ClientId, ActorId = userId,
             Action = "File uploaded", Metadata = entity.FileName
         });
-        await AddWorkspaceNotificationsAsync(project.ClientId, userId, $"File shared: {entity.FileName}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, projectId, userId, $"File shared: {entity.FileName}", cancellationToken);
         try { await db.SaveChangesAsync(cancellationToken); }
         catch
         {
@@ -119,7 +119,7 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             Action = "File renamed", Metadata = $"{previousName} to {fileName}"
         });
         var actorId = GetActorId();
-        await AddWorkspaceNotificationsAsync(file.ClientId, actorId, $"File renamed: {fileName}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(file.ClientId, projectId, actorId, $"File renamed: {fileName}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -139,7 +139,7 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             Action = "File deleted", Metadata = file.FileName
         });
         var actorId = GetActorId();
-        await AddWorkspaceNotificationsAsync(file.ClientId, actorId, $"File removed: {file.FileName}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(file.ClientId, projectId, actorId, $"File removed: {file.FileName}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await storage.DeleteAsync(storedPath, cancellationToken);
         return NoContent();
@@ -262,7 +262,7 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             ? userId
             : throw new InvalidOperationException("The authenticated user identifier is missing.");
 
-    private async Task AddWorkspaceNotificationsAsync(Guid clientId, Guid actorId, string message, CancellationToken cancellationToken)
+    private async Task AddWorkspaceNotificationsAsync(Guid clientId, Guid projectId, Guid actorId, string message, CancellationToken cancellationToken)
     {
         var recipientIds = await db.Users.IgnoreQueryFilters()
             .Where(user => user.ClientId == clientId && user.IsActive && user.Id != actorId)
@@ -271,7 +271,10 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             .Where(preference => recipientIds.Contains(preference.UserId) && !preference.WorkspaceUpdates)
             .Select(preference => preference.UserId).ToListAsync(cancellationToken);
         foreach (var recipientId in recipientIds.Except(optedOutIds))
-            db.Notifications.Add(new Notification { UserId = recipientId, Type = "Project update", Message = message });
+            db.Notifications.Add(new Notification
+            {
+                UserId = recipientId, Type = "Project update", Message = message, Link = $"/projects/{projectId}"
+            });
     }
 
     public sealed record RenameFileRequest(string FileName);

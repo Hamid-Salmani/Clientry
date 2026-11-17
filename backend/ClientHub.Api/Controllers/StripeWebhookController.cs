@@ -1,3 +1,5 @@
+using System.Net;
+using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
@@ -12,6 +14,7 @@ namespace ClientHub.Api.Controllers;
 [Route("api/payments/stripe-webhook")]
 public sealed class StripeWebhookController(
     ClientHubDbContext db,
+    IEmailSender emailSender,
     IConfiguration configuration,
     ILogger<StripeWebhookController> logger) : ControllerBase
 {
@@ -52,20 +55,29 @@ public sealed class StripeWebhookController(
         });
         invoice.Status = InvoiceStatus.Paid;
         invoice.StatusChangedAt = paidAt;
-        var recipientIds = await db.Users
+        var recipients = await db.Users
             .Where(user => user.ClientId == invoice.ClientId && user.IsActive)
-            .Select(user => user.Id).ToListAsync(cancellationToken);
-        var optedOutIds = await db.NotificationPreferences
-            .Where(preference => recipientIds.Contains(preference.UserId) && !preference.WorkspaceUpdates)
-            .Select(preference => preference.UserId).ToListAsync(cancellationToken);
-        foreach (var recipientId in recipientIds.Except(optedOutIds))
+            .Select(user => new
+            {
+                user.Id,
+                user.Email,
+                InAppEnabled = user.NotificationPreference == null || user.NotificationPreference.InvoiceReminders,
+                EmailEnabled = user.NotificationPreference == null || user.NotificationPreference.EmailInvoiceReminders
+            }).ToListAsync(cancellationToken);
+        foreach (var recipient in recipients.Where(user => user.InAppEnabled))
             db.Notifications.Add(new Notification
             {
-                UserId = recipientId,
+                UserId = recipient.Id,
                 Type = "Payment received",
-                Message = $"Payment received for invoice {invoice.Number}."
+                Message = $"Payment received for invoice {invoice.Number}.",
+                Link = $"/invoices/{invoice.Id}"
             });
         await db.SaveChangesAsync(cancellationToken);
+        var message = $"Payment received for invoice {invoice.Number}.";
+        var invoiceUrl = $"{(configuration["Frontend:BaseUrl"] ?? "http://localhost:5173").TrimEnd('/')}/invoices/{invoice.Id}";
+        var html = $"<p>{WebUtility.HtmlEncode(message)}</p><p><a href=\"{WebUtility.HtmlEncode(invoiceUrl)}\">View invoice</a></p>";
+        foreach (var recipient in recipients.Where(user => user.EmailEnabled))
+            await emailSender.SendAsync(recipient.Email, "Payment received", html, null, cancellationToken);
         return Ok();
     }
 }

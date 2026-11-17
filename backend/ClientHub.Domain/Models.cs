@@ -176,6 +176,7 @@ public sealed class Notification
     public Guid UserId { get; set; }
     public required string Type { get; set; }
     public required string Message { get; set; }
+    public string? Link { get; set; }
     public bool IsRead { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -185,6 +186,14 @@ public sealed class UserNotificationPreference
     public Guid UserId { get; set; }
     public bool WorkspaceUpdates { get; set; } = true;
     public bool InvoiceReminders { get; set; } = true;
+    public bool Comments { get; set; } = true;
+    public bool Approvals { get; set; } = true;
+    public bool RequestUpdates { get; set; } = true;
+    public bool EmailWorkspaceUpdates { get; set; } = true;
+    public bool EmailComments { get; set; } = true;
+    public bool EmailApprovals { get; set; } = true;
+    public bool EmailInvoiceReminders { get; set; } = true;
+    public bool EmailRequestUpdates { get; set; } = true;
     public User? User { get; set; }
 }
 

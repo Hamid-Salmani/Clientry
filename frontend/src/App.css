@@ -241,6 +241,19 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .invoice-draft-modal .create-project-form { gap: 10px; }
 .settings-panel { max-width: 760px; padding: 19px; }
 .settings-panel .panel-heading { margin-bottom: 6px; }
+.settings-email-heading { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #eff0f4; padding-top: 16px; }
+.settings-email-heading strong { color: #525664; font-size: 11px; }
+.settings-email-heading span { color: #9599a5; font-size: 9px; }
+.notifications-page-panel { padding-top: 0; }
+.notification-filters { display: flex; align-items: center; gap: 7px; border-bottom: 1px solid #eff0f4; padding: 12px 0; }
+.notification-filters button { border: 0; border-radius: 6px; padding: 7px 12px; background: transparent; color: #777b89; font: inherit; font-size: 10px; cursor: pointer; }
+.notification-filters button.active { background: #f0f0fb; color: #5e61bd; font-weight: 650; }
+.notification-filters > span { margin-left: auto; color: #9297a3; font-size: 9px; }
+.notification-page-list { display: flex; flex-direction: column; }
+.notification-page-item { display: flex; align-items: flex-start; gap: 12px; border: 0; border-bottom: 1px solid #eff0f4; padding: 15px 4px; background: transparent; text-align: left; cursor: pointer; }
+.notification-page-item:last-child { border-bottom: 0; }
+.notification-page-item.unread { background: #f8f8ff; }
+.notification-page-item > i { width: 7px; height: 7px; flex: none; margin: 6px 6px 0 auto; border-radius: 50%; background: #7474cf; }
 .workspace-settings-form { display: flex; flex-direction: column; gap: 12px; margin-top: 13px; }
 .workspace-settings-form .panel-heading { margin-bottom: 0; }
 .workspace-settings-form label { display: flex; flex-direction: column; gap: 6px; color: #656977; font-size: 9px; font-weight: 600; }
@@ -588,6 +601,11 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 :root[data-theme="dark"] body, :root[data-theme="dark"] .app-shell, :root[data-theme="dark"] .main-panel { background: #171923; color: #e4e6ed; }
 :root[data-theme="dark"] .request-form, :root[data-theme="dark"] .request-detail { background: #20232f; border-color: #353947; }
 :root[data-theme="dark"] .team-members-panel { background: #20232f; border-color: #353947; }
+:root[data-theme="dark"] .settings-email-heading { border-color: #303442; }
+:root[data-theme="dark"] .settings-email-heading strong { color: #e1e3ec; }
+:root[data-theme="dark"] .notification-filters { border-color: #303442; }
+:root[data-theme="dark"] .notification-filters button.active, :root[data-theme="dark"] .notification-page-item.unread { background: #303149; color: #b6b7ff; }
+:root[data-theme="dark"] .notification-page-item { border-color: #303442; }
 :root[data-theme="dark"] .request-form input, :root[data-theme="dark"] .request-form textarea, :root[data-theme="dark"] .request-form select, :root[data-theme="dark"] .request-filters select, :root[data-theme="dark"] .request-add-files input, :root[data-theme="dark"] .request-list-item, :root[data-theme="dark"] .request-attachment { background: #20232f; border-color: #383c4a; color: #e4e6ed; }
 :root[data-theme="dark"] .request-list-item { border-top-color: #383c4a; }
 :root[data-theme="dark"] .request-detail > h2, :root[data-theme="dark"] .request-response strong, :root[data-theme="dark"] .request-attachments > strong, :root[data-theme="dark"] .request-list-main strong { color: #e1e3ec; }

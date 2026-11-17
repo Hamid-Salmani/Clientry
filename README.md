@@ -12,12 +12,13 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - Project administration: searchable, filterable, sortable paged project lists; project edits and status/archive transitions; milestone CRUD, completion, ordering, and per-project activity history.
 - Project files can be uploaded, downloaded, renamed, and removed by their uploader or an administrator; project comments can be edited or removed by their author or an administrator, with activity and SignalR updates.
 - Invoice administration supports draft creation/editing/deletion, valid status transitions, verified-payment-only completion, PDF downloads, and CSV export.
-- User-scoped notifications provide paged retrieval, read/unread controls, and account-persisted workspace-update and invoice-reminder preferences; project and invoice changes generate notifications according to those preferences.
+- User-scoped notifications provide a filtered inbox, read/unread controls, deep links, and account-persisted in-app and email preferences for project updates, comments, approvals, invoices, and requests.
 - Clients can submit and track work requests with up to three validated attachments; administrators can filter the requests inbox, move new requests into review, accept or decline with a response, and convert eligible requests into projects.
 - The client home highlights pending approvals, outstanding invoice totals, unread notifications, activity since the user's previous visit, and the next milestone dates; the overview values are queried within the authenticated client's scope.
 - Invoice details show line items, tax, discounts, totals, payment history, and status milestones; paid invoices have a QuestPDF receipt, and client owners can maintain the billing information printed on receipts.
 - Project files support drag-and-drop or multi-file uploads with per-file progress, authenticated image/PDF previews, uploader grouping, and a scoped ZIP archive download.
 - Administrators can persist the workspace display name and support email; client settings remain personal to their account.
+- Accounts support profile edits, password changes, and signing out all devices; owners manage client billing and team access, while members can view the team and billing details.
 - Client workspace names and support contacts shown in the profile and overview are loaded from the authenticated account and saved workspace configuration; the sign-in page uses illustrative branding rather than sample project records.
 - The dashboard uses database-side counts and a six-month payment window; project, invoice, file, comment, activity, invitation, client, and notification collections support bounded pagination, with search or sorting where applicable.
 - React + TypeScript frontend for client and admin workspaces, project detail, conversations, files, invoices, client management, invoice administration, and persisted workspace settings.

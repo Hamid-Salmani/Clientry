@@ -61,19 +61,25 @@ public sealed class ApprovalsController(
         });
 
         var recipients = await db.Users.Where(user => user.ClientId == milestone.ClientId && user.IsActive)
-            .Select(user => new { user.Id, user.Email }).ToListAsync(cancellationToken);
-        foreach (var recipient in recipients)
+            .Select(user => new
+            {
+                user.Id, user.Email,
+                InAppEnabled = user.NotificationPreference == null || user.NotificationPreference.Approvals,
+                EmailEnabled = user.NotificationPreference == null || user.NotificationPreference.EmailApprovals
+            }).ToListAsync(cancellationToken);
+        foreach (var recipient in recipients.Where(user => user.InAppEnabled))
             db.Notifications.Add(new Notification
             {
                 UserId = recipient.Id, Type = "Approval requested",
-                Message = $"Approval requested for {milestone.Title} in {milestone.Project!.Name}."
+                Message = $"Approval requested for {milestone.Title} in {milestone.Project!.Name}.",
+                Link = "/approvals"
             });
         await db.SaveChangesAsync(cancellationToken);
 
         var approvalUrl = $"{GetFrontendBaseUrl()}/approvals";
         var html = $"<p>Approval is requested for <strong>{WebUtility.HtmlEncode(milestone.Title)}</strong> " +
             $"in {WebUtility.HtmlEncode(milestone.Project!.Name)}.</p><p><a href=\"{WebUtility.HtmlEncode(approvalUrl)}\">Review approval</a></p>";
-        foreach (var recipient in recipients)
+        foreach (var recipient in recipients.Where(user => user.EmailEnabled))
             await emailSender.SendAsync(recipient.Email, "Milestone approval requested", html, null, cancellationToken);
         return NoContent();
     }
@@ -119,17 +125,25 @@ public sealed class ApprovalsController(
 
         var admins = await db.Users.IgnoreQueryFilters()
             .Where(user => user.Role == UserRole.Admin && user.IsActive)
-            .Select(user => new { user.Id, user.Email }).ToListAsync(cancellationToken);
+            .Select(user => new
+            {
+                user.Id, user.Email,
+                InAppEnabled = user.NotificationPreference == null || user.NotificationPreference.Approvals,
+                EmailEnabled = user.NotificationPreference == null || user.NotificationPreference.EmailApprovals
+            }).ToListAsync(cancellationToken);
         var message = decision == MilestoneApprovalStatus.Approved
             ? $"{milestone.Title} in {projectName} was approved."
             : $"Changes were requested for {milestone.Title} in {projectName}: {note}";
-        foreach (var admin in admins)
-            db.Notifications.Add(new Notification { UserId = admin.Id, Type = "Approval decision", Message = message });
+        foreach (var admin in admins.Where(user => user.InAppEnabled))
+            db.Notifications.Add(new Notification
+            {
+                UserId = admin.Id, Type = "Approval decision", Message = message, Link = $"/projects/{projectId}"
+            });
         await db.SaveChangesAsync(cancellationToken);
 
         var projectUrl = $"{GetFrontendBaseUrl()}/projects/{projectId}";
         var html = $"<p>{WebUtility.HtmlEncode(message)}</p><p><a href=\"{WebUtility.HtmlEncode(projectUrl)}\">View project</a></p>";
-        foreach (var admin in admins)
+        foreach (var admin in admins.Where(user => user.EmailEnabled))
             await emailSender.SendAsync(admin.Email, "Milestone approval decision", html, null, cancellationToken);
         return NoContent();
     }

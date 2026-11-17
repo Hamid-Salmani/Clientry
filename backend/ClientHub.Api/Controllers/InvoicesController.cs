@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Stripe;
 using System.Text;
+using System.Net;
 using DomainInvoice = ClientHub.Domain.Invoice;
 using DomainInvoiceLineItem = ClientHub.Domain.InvoiceLineItem;
 
@@ -15,7 +16,11 @@ namespace ClientHub.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/invoices")]
-public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService pdf) : ControllerBase
+public sealed class InvoicesController(
+    ClientHubDbContext db,
+    InvoicePdfService pdf,
+    IEmailSender emailSender,
+    IConfiguration configuration) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List(
@@ -241,7 +246,7 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         invoice.Status = InvoiceStatus.Sent;
         invoice.SentAt = DateTime.UtcNow;
         invoice.StatusChangedAt = invoice.SentAt;
-        await AddInvoiceNotificationsAsync(invoice.ClientId, $"Invoice {invoice.Number} is ready for payment.", cancellationToken);
+        await AddInvoiceNotificationsAsync(invoice.Id, invoice.ClientId, $"Invoice {invoice.Number} is ready for payment.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -263,7 +268,7 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         if (nextStatus == InvoiceStatus.Sent)
             invoice.SentAt = invoice.StatusChangedAt;
         if (nextStatus == InvoiceStatus.Overdue)
-            await AddInvoiceNotificationsAsync(invoice.ClientId, $"Invoice {invoice.Number} is overdue.", cancellationToken);
+            await AddInvoiceNotificationsAsync(invoice.Id, invoice.ClientId, $"Invoice {invoice.Number} is overdue.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -317,14 +322,26 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 
-    private async Task AddInvoiceNotificationsAsync(Guid clientId, string message, CancellationToken cancellationToken)
+    private async Task AddInvoiceNotificationsAsync(Guid invoiceId, Guid clientId, string message, CancellationToken cancellationToken)
     {
-        var recipientIds = await db.Users
-            .Where(user => user.ClientId == clientId && user.IsActive &&
-                (user.NotificationPreference == null || user.NotificationPreference.InvoiceReminders))
-            .Select(user => user.Id).ToListAsync(cancellationToken);
-        foreach (var recipientId in recipientIds)
-            db.Notifications.Add(new Notification { UserId = recipientId, Type = "Invoice reminder", Message = message });
+        var recipients = await db.Users
+            .Where(user => user.ClientId == clientId && user.IsActive)
+            .Select(user => new
+            {
+                user.Id, user.Email,
+                InAppEnabled = user.NotificationPreference == null || user.NotificationPreference.InvoiceReminders,
+                EmailEnabled = user.NotificationPreference == null || user.NotificationPreference.EmailInvoiceReminders
+            }).ToListAsync(cancellationToken);
+        foreach (var recipient in recipients.Where(user => user.InAppEnabled))
+            db.Notifications.Add(new Notification
+            {
+                UserId = recipient.Id, Type = "Invoice reminder", Message = message, Link = $"/invoices/{invoiceId}"
+            });
+        var baseUrl = (configuration["Frontend:BaseUrl"] ?? "http://localhost:5173").TrimEnd('/');
+        var invoiceUrl = $"{baseUrl}/invoices/{invoiceId}";
+        var html = $"<p>{WebUtility.HtmlEncode(message)}</p><p><a href=\"{WebUtility.HtmlEncode(invoiceUrl)}\">View invoice</a></p>";
+        foreach (var recipient in recipients.Where(user => user.EmailEnabled))
+            await emailSender.SendAsync(recipient.Email, "Invoice update", html, null, cancellationToken);
     }
 
     public sealed record CreateInvoiceRequest(

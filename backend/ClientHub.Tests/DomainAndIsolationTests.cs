@@ -288,7 +288,8 @@ public sealed class DomainAndIsolationTests
         await db.SaveChangesAsync();
 
         var controller = new ProjectRequestsController(db, new UnusedFileStorage(),
-            new ClientHub.Api.Validators.ProjectRequestValidator());
+            new ClientHub.Api.Validators.ProjectRequestValidator(), new CapturingEmailSender(),
+            new ConfigurationBuilder().AddInMemoryCollection().Build());
         SetAuthenticatedUser(controller, admin.Id, UserRole.Admin);
         Assert.IsType<NoContentResult>(await controller.StartReview(newRequest.Id, CancellationToken.None));
         Assert.Equal(ProjectRequestStatus.InReview, newRequest.Status);
@@ -481,7 +482,8 @@ public sealed class DomainAndIsolationTests
         }
 
         await using var db = new ClientHubDbContext(options, new TestScope(clientA.Id, userA.Id, true));
-        var controller = new InvoicesController(db, new InvoicePdfService());
+        var controller = new InvoicesController(db, new InvoicePdfService(), new CapturingEmailSender(),
+            new ConfigurationBuilder().AddInMemoryCollection().Build());
         SetAuthenticatedUser(controller, userA.Id, UserRole.Client, clientA.Id);
         var detail = Assert.IsType<OkObjectResult>(await controller.Get(invoiceA.Id, CancellationToken.None));
         using var detailJson = JsonDocument.Parse(JsonSerializer.Serialize(detail.Value));
@@ -792,7 +794,8 @@ public sealed class DomainAndIsolationTests
             });
         await db.SaveChangesAsync();
 
-        var controller = new InvoicesController(db, new InvoicePdfService());
+        var controller = new InvoicesController(db, new InvoicePdfService(), new CapturingEmailSender(),
+            new ConfigurationBuilder().AddInMemoryCollection().Build());
         var result = Assert.IsType<OkObjectResult>(await controller.List(
             "north", "Sent", null, 1, 1, "number", false, CancellationToken.None));
         var page = Assert.IsType<PagedResult<object>>(result.Value);
@@ -812,7 +815,10 @@ public sealed class DomainAndIsolationTests
         await db.Database.EnsureCreatedAsync();
         var userId = Guid.NewGuid();
         var otherUserId = Guid.NewGuid();
-        var ownNotification = new Notification { UserId = userId, Type = "Project", Message = "Project updated" };
+        var ownNotification = new Notification
+        {
+            UserId = userId, Type = "Project", Message = "Project updated", Link = "/projects/00000000-0000-0000-0000-000000000001"
+        };
         var privateNotification = new Notification { UserId = otherUserId, Type = "Invoice", Message = "Invoice ready" };
         db.Users.AddRange(
             new User { Id = userId, Email = "notify@example.test", FullName = "Notify User", Role = UserRole.Admin, PasswordHash = "hash" },
@@ -828,15 +834,46 @@ public sealed class DomainAndIsolationTests
         Assert.Equal(1, page.Total);
         Assert.Equal(1, page.UnreadCount);
         Assert.Single(page.Items);
+        Assert.Equal(ownNotification.Link,
+            JsonDocument.Parse(JsonSerializer.Serialize(page.Items.Single())).RootElement.GetProperty("link").GetString());
         Assert.IsType<NotFoundResult>(await controller.MarkRead(privateNotification.Id, CancellationToken.None));
         Assert.False(await db.Notifications.Where(item => item.Id == privateNotification.Id).Select(item => item.IsRead).SingleAsync());
 
         Assert.IsType<NoContentResult>(await controller.MarkRead(ownNotification.Id, CancellationToken.None));
         Assert.IsType<NoContentResult>(await controller.UpdatePreferences(
-            new NotificationsController.NotificationPreferencesRequest(false, true), CancellationToken.None));
+            new NotificationsController.NotificationPreferencesRequest(
+                false, true, false, true, false, true, false, true, false, false), CancellationToken.None));
         var preferences = await db.NotificationPreferences.SingleAsync(item => item.UserId == userId);
         Assert.False(preferences.WorkspaceUpdates);
         Assert.True(preferences.InvoiceReminders);
+        Assert.False(preferences.Comments);
+        Assert.False(preferences.RequestUpdates);
+        Assert.False(preferences.EmailRequestUpdates);
+    }
+
+    [Fact]
+    public async Task LogoutAllRevokesEveryRefreshTokenForTheCurrentUser()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var user = new User
+        {
+            Email = "logout@example.test", FullName = "Logout User", Role = UserRole.Admin,
+            PasswordHash = "hash"
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        await db.Database.EnsureCreatedAsync();
+        db.Users.Add(user);
+        db.RefreshTokens.AddRange(
+            new RefreshToken { UserId = user.Id, TokenHash = "refresh-one", ExpiresAt = DateTime.UtcNow.AddDays(1) },
+            new RefreshToken { UserId = user.Id, TokenHash = "refresh-two", ExpiresAt = DateTime.UtcNow.AddDays(2) });
+        await db.SaveChangesAsync();
+
+        var controller = CreateAuthController(db);
+        SetAuthenticatedUser(controller, user.Id, UserRole.Admin);
+        Assert.IsType<NoContentResult>(await controller.LogoutAll(CancellationToken.None));
+        Assert.All(await db.RefreshTokens.ToListAsync(), token => Assert.NotNull(token.RevokedAt));
     }
 
     [Fact]

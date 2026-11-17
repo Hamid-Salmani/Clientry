@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Net;
 using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Api.Hubs;
@@ -13,7 +14,11 @@ namespace ClientHub.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/projects")]
-public sealed class ProjectsController(ClientHubDbContext db, IHubContext<ProjectHub> hub) : ControllerBase
+public sealed class ProjectsController(
+    ClientHubDbContext db,
+    IHubContext<ProjectHub> hub,
+    IEmailSender emailSender,
+    IConfiguration configuration) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List(
@@ -109,7 +114,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         db.Projects.Add(project);
         var actorId = GetActorId();
         AddActivity(project, actorId, "Project created", project.Name);
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Project created: {project.Name}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Project created: {project.Name}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return CreatedAtAction(nameof(Get), new { projectId = project.Id }, new { project.Id });
     }
@@ -151,7 +156,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         project.DueDate = request.DueDate;
         var actorId = GetActorId();
         AddActivity(project, actorId, "Project updated", project.Name);
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Project updated: {project.Name}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Project updated: {project.Name}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -172,7 +177,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         project.Status = nextStatus;
         var actorId = GetActorId();
         AddActivity(project, actorId, "Project status changed", $"{previousStatus} to {nextStatus}");
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"{project.Name} is now {nextStatus}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"{project.Name} is now {nextStatus}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -200,7 +205,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         db.Milestones.Add(milestone);
         var actorId = GetActorId();
         AddActivity(project, actorId, "Milestone added", milestone.Title);
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Milestone added: {milestone.Title}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Milestone added: {milestone.Title}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return CreatedAtAction(nameof(Get), new { projectId }, new { milestone.Id, milestone.Title, milestone.Order });
     }
@@ -219,7 +224,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         milestone.DueDate = request.DueDate;
         var actorId = GetActorId();
         AddActivity(project, actorId, "Milestone updated", milestone.Title);
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Milestone updated: {milestone.Title}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Milestone updated: {milestone.Title}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -235,7 +240,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         db.Milestones.Remove(milestone);
         var actorId = GetActorId();
         AddActivity(project, actorId, "Milestone deleted", milestone.Title);
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Milestone removed: {milestone.Title}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Milestone removed: {milestone.Title}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -252,7 +257,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         milestone.IsCompleted = request.IsCompleted;
         var actorId = GetActorId();
         AddActivity(project, actorId, request.IsCompleted ? "Milestone completed" : "Milestone reopened", milestone.Title);
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId,
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId,
             request.IsCompleted ? $"Milestone completed: {milestone.Title}" : $"Milestone reopened: {milestone.Title}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
@@ -275,7 +280,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
             byId[request.MilestoneIds[index]].Order = index + 1;
         var actorId = GetActorId();
         AddActivity(project, actorId, "Milestones reordered", $"{milestones.Count} milestones");
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Milestones reordered for {project.Name}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Milestones reordered for {project.Name}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -343,7 +348,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
             ProjectId = project.Id, ClientId = project.ClientId, ActorId = authorId,
             Action = "Comment added", Metadata = "A project update was posted."
         });
-        await AddWorkspaceNotificationsAsync(project.ClientId, authorId, $"New project update: {project.Name}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, authorId, $"New project update: {project.Name}", cancellationToken, isComment: true);
         await db.SaveChangesAsync(cancellationToken);
         await hub.Clients.Group($"project:{projectId}").SendAsync("CommentAdded", new
         {
@@ -365,7 +370,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         comment.Body = request.Body.Trim();
         var actorId = GetActorId();
         AddActivity(project, actorId, "Comment updated", comment.Body);
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Project update edited: {project.Name}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Project update edited: {project.Name}", cancellationToken, isComment: true);
         await db.SaveChangesAsync(cancellationToken);
         var author = await db.Users.Where(x => x.Id == comment.AuthorId)
             .Select(x => x.FullName).SingleOrDefaultAsync(cancellationToken) ?? "Team member";
@@ -387,7 +392,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         db.Comments.Remove(comment);
         var actorId = GetActorId();
         AddActivity(project, actorId, "Comment deleted", "A project update was removed.");
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Project update removed: {project.Name}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Project update removed: {project.Name}", cancellationToken, isComment: true);
         await db.SaveChangesAsync(cancellationToken);
         await hub.Clients.Group($"project:{projectId}").SendAsync("CommentDeleted", new { comment.Id }, cancellationToken);
         return NoContent();
@@ -404,21 +409,35 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         project.Status = ProjectStatus.Archived;
         var actorId = GetActorId();
         AddActivity(project, actorId, "Project archived", previousStatus.ToString());
-        await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Project archived: {project.Name}", cancellationToken);
+        await AddWorkspaceNotificationsAsync(project.ClientId, project.Id, actorId, $"Project archived: {project.Name}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
 
-    private async Task AddWorkspaceNotificationsAsync(Guid clientId, Guid actorId, string message, CancellationToken cancellationToken)
+    private async Task AddWorkspaceNotificationsAsync(Guid clientId, Guid projectId, Guid actorId, string message,
+        CancellationToken cancellationToken, bool isComment = false)
     {
-        var recipientIds = await db.Users.IgnoreQueryFilters()
+        var recipients = await db.Users.IgnoreQueryFilters()
             .Where(user => user.ClientId == clientId && user.IsActive && user.Id != actorId)
-            .Select(user => user.Id).ToListAsync(cancellationToken);
-        var optedOutIds = await db.NotificationPreferences.IgnoreQueryFilters()
-            .Where(preference => recipientIds.Contains(preference.UserId) && !preference.WorkspaceUpdates)
-            .Select(preference => preference.UserId).ToListAsync(cancellationToken);
-        foreach (var recipientId in recipientIds.Except(optedOutIds))
-            db.Notifications.Add(new Notification { UserId = recipientId, Type = "Project update", Message = message });
+            .Select(user => new
+            {
+                user.Id, user.Email,
+                InAppEnabled = user.NotificationPreference == null ||
+                    (isComment ? user.NotificationPreference.Comments : user.NotificationPreference.WorkspaceUpdates),
+                EmailEnabled = user.NotificationPreference == null ||
+                    (isComment ? user.NotificationPreference.EmailComments : user.NotificationPreference.EmailWorkspaceUpdates)
+            }).ToListAsync(cancellationToken);
+        foreach (var recipient in recipients.Where(user => user.InAppEnabled))
+            db.Notifications.Add(new Notification
+            {
+                UserId = recipient.Id, Type = isComment ? "Comment" : "Project update",
+                Message = message, Link = $"/projects/{projectId}"
+            });
+        var baseUrl = (configuration["Frontend:BaseUrl"] ?? "http://localhost:5173").TrimEnd('/');
+        var projectUrl = $"{baseUrl}/projects/{projectId}";
+        var html = $"<p>{WebUtility.HtmlEncode(message)}</p><p><a href=\"{WebUtility.HtmlEncode(projectUrl)}\">View project</a></p>";
+        foreach (var recipient in recipients.Where(user => user.EmailEnabled))
+            await emailSender.SendAsync(recipient.Email, isComment ? "Project comment update" : "Project update", html, null, cancellationToken);
     }
 
     private Guid GetActorId() =>

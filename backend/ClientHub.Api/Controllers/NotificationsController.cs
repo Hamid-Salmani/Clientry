@@ -30,7 +30,8 @@ public sealed class NotificationsController(ClientHubDbContext db) : ControllerB
             .ThenBy(notification => notification.Id).Skip(skip).Take(pageSize)
             .Select(notification => new
             {
-                notification.Id, notification.Type, notification.Message, notification.IsRead, notification.CreatedAt
+                notification.Id, notification.Type, notification.Message, link = notification.Link,
+                notification.IsRead, notification.CreatedAt
             }).ToListAsync(cancellationToken);
         return Ok(new NotificationsPage(items.Cast<object>().ToArray(), total, page, pageSize, unreadCount));
     }
@@ -67,7 +68,15 @@ public sealed class NotificationsController(ClientHubDbContext db) : ControllerB
             .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         return Ok(new NotificationPreferencesResponse(
             preferences?.WorkspaceUpdates ?? true,
-            preferences?.InvoiceReminders ?? true));
+            preferences?.InvoiceReminders ?? true,
+            preferences?.Comments ?? true,
+            preferences?.Approvals ?? true,
+            preferences?.RequestUpdates ?? true,
+            preferences?.EmailWorkspaceUpdates ?? true,
+            preferences?.EmailComments ?? true,
+            preferences?.EmailApprovals ?? true,
+            preferences?.EmailInvoiceReminders ?? true,
+            preferences?.EmailRequestUpdates ?? true));
     }
 
     [HttpPut("preferences")]
@@ -83,6 +92,14 @@ public sealed class NotificationsController(ClientHubDbContext db) : ControllerB
         }
         preferences.WorkspaceUpdates = request.WorkspaceUpdates;
         preferences.InvoiceReminders = request.InvoiceReminders;
+        preferences.Comments = request.Comments;
+        preferences.Approvals = request.Approvals;
+        preferences.RequestUpdates = request.RequestUpdates;
+        preferences.EmailWorkspaceUpdates = request.EmailWorkspaceUpdates;
+        preferences.EmailComments = request.EmailComments;
+        preferences.EmailApprovals = request.EmailApprovals;
+        preferences.EmailInvoiceReminders = request.EmailInvoiceReminders;
+        preferences.EmailRequestUpdates = request.EmailRequestUpdates;
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -92,7 +109,13 @@ public sealed class NotificationsController(ClientHubDbContext db) : ControllerB
             ? userId
             : throw new InvalidOperationException("The authenticated user identifier is missing.");
 
-    public sealed record NotificationPreferencesRequest(bool WorkspaceUpdates, bool InvoiceReminders);
-    public sealed record NotificationPreferencesResponse(bool WorkspaceUpdates, bool InvoiceReminders);
+    public sealed record NotificationPreferencesRequest(
+        bool WorkspaceUpdates, bool InvoiceReminders, bool Comments, bool Approvals, bool RequestUpdates,
+        bool EmailWorkspaceUpdates, bool EmailComments, bool EmailApprovals, bool EmailInvoiceReminders,
+        bool EmailRequestUpdates);
+    public sealed record NotificationPreferencesResponse(
+        bool WorkspaceUpdates, bool InvoiceReminders, bool Comments, bool Approvals, bool RequestUpdates,
+        bool EmailWorkspaceUpdates, bool EmailComments, bool EmailApprovals, bool EmailInvoiceReminders,
+        bool EmailRequestUpdates);
     public sealed record NotificationsPage(IReadOnlyList<object> Items, int Total, int Page, int PageSize, int UnreadCount);
 }

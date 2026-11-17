@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Net;
 using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
@@ -16,7 +17,9 @@ namespace ClientHub.Api.Controllers;
 public sealed class ProjectRequestsController(
     ClientHubDbContext db,
     IFileStorage storage,
-    IValidator<ProjectRequestsController.CreateRequest> validator) : ControllerBase
+    IValidator<ProjectRequestsController.CreateRequest> validator,
+    IEmailSender emailSender,
+    IConfiguration configuration) : ControllerBase
 {
     private const long MaxAttachmentSize = 10 * 1024 * 1024;
     private static readonly IReadOnlyDictionary<string, string> AllowedTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -245,9 +248,22 @@ public sealed class ProjectRequestsController(
     private async Task NotifyClientAsync(ProjectRequest request, string message, CancellationToken cancellationToken)
     {
         var clientUsers = await db.Users.Where(user => user.ClientId == request.ClientId && user.IsActive)
-            .Select(user => user.Id).ToListAsync(cancellationToken);
-        foreach (var userId in clientUsers)
-            db.Notifications.Add(new Notification { UserId = userId, Type = "Request update", Message = message });
+            .Select(user => new
+            {
+                user.Id, user.Email,
+                InAppEnabled = user.NotificationPreference == null || user.NotificationPreference.RequestUpdates,
+                EmailEnabled = user.NotificationPreference == null || user.NotificationPreference.EmailRequestUpdates
+            }).ToListAsync(cancellationToken);
+        foreach (var user in clientUsers.Where(user => user.InAppEnabled))
+            db.Notifications.Add(new Notification
+            {
+                UserId = user.Id, Type = "Request update", Message = message, Link = $"/requests/{request.Id}"
+            });
+        var baseUrl = (configuration["Frontend:BaseUrl"] ?? "http://localhost:5173").TrimEnd('/');
+        var requestUrl = $"{baseUrl}/requests/{request.Id}";
+        var html = $"<p>{WebUtility.HtmlEncode(message)}</p><p><a href=\"{WebUtility.HtmlEncode(requestUrl)}\">View request</a></p>";
+        foreach (var user in clientUsers.Where(user => user.EmailEnabled))
+            await emailSender.SendAsync(user.Email, "Work request update", html, null, cancellationToken);
     }
 
     private async Task NotifyAdminsAsync(ProjectRequest request, string message, CancellationToken cancellationToken)
@@ -255,7 +271,11 @@ public sealed class ProjectRequestsController(
         var adminUsers = await db.Users.IgnoreQueryFilters().Where(user => user.Role == UserRole.Admin && user.IsActive)
             .Select(user => user.Id).ToListAsync(cancellationToken);
         foreach (var userId in adminUsers)
-            db.Notifications.Add(new Notification { UserId = userId, Type = "Request update", Message = $"{message}: {request.Title}" });
+            db.Notifications.Add(new Notification
+            {
+                UserId = userId, Type = "Request update", Message = $"{message}: {request.Title}",
+                Link = $"/requests/{request.Id}"
+            });
     }
 
     private Guid GetUserId() =>
