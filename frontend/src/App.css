@@ -308,6 +308,12 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .file-meta { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
 .file-meta strong { overflow: hidden; color: #555967; font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .file-meta small { color: #a0a3ad; font-size: 8px; }
+.inline-edit-form { display: flex; min-width: 0; flex: 1; align-items: center; gap: 5px; }
+.inline-edit-form input, .inline-edit-form textarea { min-width: 0; flex: 1; border: 1px solid #eceef3; border-radius: 5px; padding: 6px; color: #555967; font: inherit; font-size: 9px; }
+.comment-edit-form { flex-wrap: wrap; margin-top: 7px; }
+.comment-edit-form textarea { flex-basis: 100%; min-height: 65px; resize: vertical; }
+.comment-actions { display: flex; gap: 5px; margin-top: 7px; }
+.comment-actions .download-button, .comment-actions .cancel-button { padding: 4px 6px; font-size: 8px; }
 .realtime-note { margin: -12px 0 16px; color: #a1784e; font-size: 9px; }
 .conversation-count { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #f0f0fb; color: #7275c9; font-size: 9px; }
 .comments-list { display: flex; max-height: 350px; min-height: 165px; flex-direction: column; gap: 15px; overflow-y: auto; margin: 17px 0; }

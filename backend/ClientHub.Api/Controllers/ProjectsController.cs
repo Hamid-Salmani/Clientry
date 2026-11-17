@@ -309,7 +309,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         var comments = await query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
             .Skip(skip).Take(pageSize).Select(x => new
             {
-                x.Id, x.Body, x.CreatedAt, author = x.Author == null ? "Team member" : x.Author.FullName
+                x.Id, x.AuthorId, x.Body, x.CreatedAt, author = x.Author == null ? "Team member" : x.Author.FullName
             }).ToListAsync(cancellationToken);
         return Ok(new PagedResult<object>(comments.Cast<object>().ToArray(), total, page, pageSize));
     }
@@ -339,7 +339,7 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         await db.SaveChangesAsync(cancellationToken);
         await hub.Clients.Group($"project:{projectId}").SendAsync("CommentAdded", new
         {
-            comment.Id, comment.Body, comment.CreatedAt, author = User.Identity?.Name
+            comment.Id, comment.AuthorId, comment.Body, comment.CreatedAt, author = User.Identity?.Name
         }, cancellationToken);
         return CreatedAtAction(nameof(Comments), new { projectId }, new { comment.Id });
     }
@@ -359,9 +359,11 @@ public sealed class ProjectsController(ClientHubDbContext db, IHubContext<Projec
         AddActivity(project, actorId, "Comment updated", comment.Body);
         await AddWorkspaceNotificationsAsync(project.ClientId, actorId, $"Project update edited: {project.Name}", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        var author = await db.Users.Where(x => x.Id == comment.AuthorId)
+            .Select(x => x.FullName).SingleOrDefaultAsync(cancellationToken) ?? "Team member";
         await hub.Clients.Group($"project:{projectId}").SendAsync("CommentUpdated", new
         {
-            comment.Id, comment.Body, comment.CreatedAt, author = User.Identity?.Name
+            comment.Id, comment.AuthorId, comment.Body, comment.CreatedAt, author
         }, cancellationToken);
         return NoContent();
     }

@@ -40,7 +40,7 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
         var items = await query.OrderByDescending(x => x.UploadedAt).ThenBy(x => x.Id)
             .Skip(skip).Take(pageSize)
-            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt }).ToListAsync(cancellationToken);
+            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt, x.UploadedById }).ToListAsync(cancellationToken);
         return Ok(new PagedResult<object>(items.Cast<object>().ToArray(), total, page, pageSize));
     }
 

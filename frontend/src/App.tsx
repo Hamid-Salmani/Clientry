@@ -8,7 +8,7 @@ import { loadStripe } from '@stripe/stripe-js'
 import './App.css'
 
 const AdminCharts = lazy(() => import('./AdminCharts'))
-type User = { name: string; role: 'Admin' | 'Client' }
+type User = { id?: string; name: string; role: 'Admin' | 'Client' }
 type Project = {
   id: string
   name: string
@@ -40,8 +40,8 @@ type Metrics = {
   revenueByMonth: { month: string; revenue: number }[]
   recentActivity: { action: string; metadata: string; createdAt: string }[]
 }
-type Comment = { id: string; body: string; createdAt: string; author: string }
-type ProjectFile = { id: string; fileName: string; contentType: string; size: number; uploadedAt: string }
+type Comment = { id: string; authorId: string; body: string; createdAt: string; author: string }
+type ProjectFile = { id: string; fileName: string; contentType: string; size: number; uploadedAt: string; uploadedById: string }
 type NotificationItem = { id: string; type: string; message: string; isRead: boolean; createdAt: string }
 type NotificationPreferences = { workspaceUpdates: boolean; invoiceReminders: boolean }
 type AdminWorkspaceSettings = { name: string; supportEmail: string }
@@ -148,7 +148,7 @@ function App() {
     routerNavigate(page === 'Overview' ? '/' : `/${page.toLowerCase()}`)
   }
   const openProject = (project: Project) => {
-    openProject(project)
+    setSelectedProject(project)
     setOpenPopover(null)
     routerNavigate(`/projects/${project.id}`)
   }
@@ -180,7 +180,7 @@ function App() {
 
   const profileQuery = useQuery({
     queryKey: ['profile', token],
-    queryFn: () => request<{ name: string; role: User['role'] }>('/auth/me', token),
+    queryFn: () => request<{ id: string; name: string; role: User['role'] }>('/auth/me', token),
     enabled: Boolean(token),
   })
   const workspaceQuery = useQuery({
@@ -223,7 +223,7 @@ function App() {
 
   useEffect(() => {
     if (!profileQuery.data) return
-    setUser({ name: profileQuery.data.name, role: profileQuery.data.role })
+    setUser({ id: profileQuery.data.id, name: profileQuery.data.name, role: profileQuery.data.role })
   }, [profileQuery.data])
 
   useEffect(() => {
@@ -389,7 +389,7 @@ function App() {
         method: 'POST', body: JSON.stringify({ body: commentText }),
       })
       setComments((existing) => [...existing, {
-        id: saved.id, body: commentText, createdAt: new Date().toISOString(), author: user?.name ?? 'You',
+        id: saved.id, authorId: user?.id ?? '', body: commentText, createdAt: new Date().toISOString(), author: user?.name ?? 'You',
       }])
       setCommentText('')
     } catch (reason) {
@@ -403,7 +403,8 @@ function App() {
       const data = new FormData()
       data.append('file', file)
       await request(`/projects/${selectedProject.id}/files`, token, { method: 'POST', body: data })
-      setProjectFiles(await request<ProjectFile[]>(`/projects/${selectedProject.id}/files`, token))
+      const result = await request<{ items: ProjectFile[] }>(`/projects/${selectedProject.id}/files?page=1&pageSize=100`, token)
+      setProjectFiles(result.items)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to upload this file.')
     }
@@ -497,7 +498,7 @@ function App() {
           {error && <div className="alert" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
           {loading && <div className="loading-bar" aria-label="Loading workspace" />}
           {selectedProject ? (
-            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} token={token} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => navigateTo('Projects')} />
+            <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onBack={() => navigateTo('Projects')} />
           ) : activePage === 'Overview' ? (
             <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
           ) : activePage === 'Projects' ? (
@@ -1037,12 +1038,84 @@ function ProjectCreateModal({ clients, token, onClose, onCreated }: {
   </div>
 }
 
-function ProjectDetail({ project, comments, setComments, files, token, commentText, setCommentText, onSubmit, onUpload, onDownload, onBack }: {
+function ProjectDetail({ project, comments, setComments, files, setFiles, token, currentUserId, isAdmin, commentText, setCommentText, onSubmit, onUpload, onDownload, onBack }: {
   project: Project; comments: Comment[]; setComments: React.Dispatch<React.SetStateAction<Comment[]>>
-  files: ProjectFile[]; token: string; commentText: string; setCommentText: (value: string) => void
+  files: ProjectFile[]; setFiles: React.Dispatch<React.SetStateAction<ProjectFile[]>>
+  token: string; currentUserId: string; isAdmin: boolean; commentText: string; setCommentText: (value: string) => void
   onSubmit: (event: FormEvent) => void; onUpload: (file: File) => void; onDownload: (file: ProjectFile) => void; onBack: () => void
 }) {
   const [realtimeError, setRealtimeError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [editingComment, setEditingComment] = useState<string | null>(null)
+  const [commentDraft, setCommentDraft] = useState('')
+  const [editingFile, setEditingFile] = useState<string | null>(null)
+  const [fileNameDraft, setFileNameDraft] = useState('')
+  const [busyAction, setBusyAction] = useState(false)
+
+  async function saveComment(event: FormEvent, comment: Comment) {
+    event.preventDefault()
+    if (!commentDraft.trim()) return
+    setBusyAction(true)
+    setActionError('')
+    try {
+      await request(`/projects/${project.id}/comments/${comment.id}`, token, {
+        method: 'PUT', body: JSON.stringify({ body: commentDraft.trim() }),
+      })
+      setComments((existing) => existing.map((item) => item.id === comment.id ? { ...item, body: commentDraft.trim() } : item))
+      setEditingComment(null)
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Unable to edit this update.')
+    } finally {
+      setBusyAction(false)
+    }
+  }
+
+  async function deleteComment(comment: Comment) {
+    if (!window.confirm('Delete this project update?')) return
+    setBusyAction(true)
+    setActionError('')
+    try {
+      await request(`/projects/${project.id}/comments/${comment.id}`, token, { method: 'DELETE' })
+      setComments((existing) => existing.filter((item) => item.id !== comment.id))
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Unable to delete this update.')
+    } finally {
+      setBusyAction(false)
+    }
+  }
+
+  async function renameFile(event: FormEvent, file: ProjectFile) {
+    event.preventDefault()
+    if (!fileNameDraft.trim()) return
+    setBusyAction(true)
+    setActionError('')
+    try {
+      await request(`/projects/${project.id}/files/${file.id}`, token, {
+        method: 'PATCH', body: JSON.stringify({ fileName: fileNameDraft.trim() }),
+      })
+      setFiles((existing) => existing.map((item) => item.id === file.id ? { ...item, fileName: fileNameDraft.trim() } : item))
+      setEditingFile(null)
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Unable to rename this file.')
+    } finally {
+      setBusyAction(false)
+    }
+  }
+
+  async function deleteFile(file: ProjectFile) {
+    if (!window.confirm(`Delete "${file.fileName}"?`)) return
+    setBusyAction(true)
+    setActionError('')
+    try {
+      await request(`/projects/${project.id}/files/${file.id}`, token, { method: 'DELETE' })
+      setFiles((existing) => existing.filter((item) => item.id !== file.id))
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Unable to delete this file.')
+    } finally {
+      setBusyAction(false)
+    }
+  }
+
   useEffect(() => {
     const connection = new HubConnectionBuilder()
       .withUrl(`${apiBase}/hubs/projects/${project.id}`, { accessTokenFactory: () => token })
@@ -1070,6 +1143,7 @@ function ProjectDetail({ project, comments, setComments, files, token, commentTe
     <button className="back-button" onClick={onBack}>← &nbsp; All projects</button>
     <div className="project-detail-heading"><div className="project-icon large"><Icon name="layers" /></div><div><div className="eyebrow">PROJECT OVERVIEW</div><h1>{project.name}<span className="heading-period">.</span></h1><p>{project.description}</p></div><span className={`status-pill status-${project.status.toLowerCase()}`}>{project.status.replace(/([A-Z])/g, ' $1').trim()}</span></div>
     {realtimeError && <div className="realtime-note" role="status">{realtimeError}</div>}
+    {actionError && <div className="alert" role="alert">{actionError}<button onClick={() => setActionError('')} aria-label="Dismiss error">×</button></div>}
     <div className="detail-grid">
       <div className="detail-stack">
         <section className="panel detail-main">
@@ -1080,12 +1154,40 @@ function ProjectDetail({ project, comments, setComments, files, token, commentTe
         </section>
         <section className="panel files-panel">
           <div className="panel-heading"><div><h2>Project files</h2><p>Shared files for this project.</p></div><label className="upload-button"><Icon name="upload" /> Upload<input type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.currentTarget.value = '' }} /></label></div>
-          {files.length ? <div className="file-list">{files.map((file) => <div className="file-row" key={file.id}><span className="invoice-file"><Icon name="file" /></span><span className="file-meta"><strong>{file.fileName}</strong><small>{(file.size / 1024).toFixed(0)} KB · {relativeDate(file.uploadedAt)}</small></span><button className="download-button" onClick={() => onDownload(file)}>Download <Icon name="arrow" /></button></div>)}</div> : <EmptyState title="No files shared yet" text="Upload a file to keep everything in one place." />}
+          {files.length ? <div className="file-list">{files.map((file) => <div className="file-row" key={file.id}>
+            <span className="invoice-file"><Icon name="file" /></span>
+            {editingFile === file.id ? <form className="inline-edit-form" onSubmit={(event) => void renameFile(event, file)}>
+              <label className="sr-only" htmlFor={`file-name-${file.id}`}>File name</label>
+              <input id={`file-name-${file.id}`} value={fileNameDraft} onChange={(event) => setFileNameDraft(event.target.value)} maxLength={255} required />
+              <button className="download-button" type="submit" disabled={busyAction}>Save</button>
+              <button className="cancel-button" type="button" onClick={() => setEditingFile(null)} disabled={busyAction}>Cancel</button>
+            </form> : <span className="file-meta"><strong>{file.fileName}</strong><small>{(file.size / 1024).toFixed(0)} KB · {relativeDate(file.uploadedAt)}</small></span>}
+            <button className="download-button" onClick={() => onDownload(file)}>Download <Icon name="arrow" /></button>
+            {(isAdmin || file.uploadedById === currentUserId) && editingFile !== file.id && <>
+              <button className="download-button" onClick={() => { setEditingFile(file.id); setFileNameDraft(file.fileName); setActionError('') }}>Rename</button>
+              <button className="cancel-button" onClick={() => void deleteFile(file)} disabled={busyAction}>Delete</button>
+            </>}
+          </div>)}</div> : <EmptyState title="No files shared yet" text="Upload a file to keep everything in one place." />}
         </section>
       </div>
       <section className="panel comments-panel">
         <div className="panel-heading"><div><h2>Conversation</h2><p>Keep project updates in one place.</p></div><span className="conversation-count">{comments.length}</span></div>
-        <div className="comments-list">{comments.length ? comments.map((comment) => <article className="comment" key={comment.id}><div className="comment-avatar">{comment.author.split(' ').map((part) => part[0]).join('').slice(0, 2)}</div><div className="comment-body"><div><strong>{comment.author}</strong><time>{relativeDate(comment.createdAt)}</time></div><p>{comment.body}</p></div></article>) : <EmptyState title="Start the conversation" text="Share a question or update with your team." />}</div>
+        <div className="comments-list">{comments.length ? comments.map((comment) => <article className="comment" key={comment.id}>
+          <div className="comment-avatar">{comment.author.split(' ').map((part) => part[0]).join('').slice(0, 2)}</div>
+          <div className="comment-body">
+            <div><strong>{comment.author}</strong><time>{relativeDate(comment.createdAt)}</time></div>
+            {editingComment === comment.id ? <form className="inline-edit-form comment-edit-form" onSubmit={(event) => void saveComment(event, comment)}>
+              <label className="sr-only" htmlFor={`comment-edit-${comment.id}`}>Edit project update</label>
+              <textarea id={`comment-edit-${comment.id}`} value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength={5000} required />
+              <button className="download-button" type="submit" disabled={busyAction}>Save</button>
+              <button className="cancel-button" type="button" onClick={() => setEditingComment(null)} disabled={busyAction}>Cancel</button>
+            </form> : <p>{comment.body}</p>}
+            {(isAdmin || comment.authorId === currentUserId) && editingComment !== comment.id && <div className="comment-actions">
+              <button className="download-button" onClick={() => { setEditingComment(comment.id); setCommentDraft(comment.body); setActionError('') }}>Edit</button>
+              <button className="cancel-button" onClick={() => void deleteComment(comment)} disabled={busyAction}>Delete</button>
+            </div>}
+          </div>
+        </article>) : <EmptyState title="Start the conversation" text="Share a question or update with your team." />}</div>
         <form className="comment-form" onSubmit={onSubmit}><label className="sr-only" htmlFor="comment">Write an update</label><textarea id="comment" value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Write an update..." maxLength={5000} /><button className="primary-button" disabled={!commentText.trim()}>Send update <Icon name="arrow" /></button></form>
       </section>
     </div>
