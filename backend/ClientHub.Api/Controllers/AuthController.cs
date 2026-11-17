@@ -32,6 +32,7 @@ public sealed class AuthController(
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(30);
 
     [HttpPost("login")]
+    [AllowAnonymous]
     [EnableRateLimiting("auth")]
     public async Task<IActionResult> Login(LoginRequest request, CancellationToken cancellationToken)
     {
@@ -64,6 +65,7 @@ public sealed class AuthController(
     }
 
     [HttpPost("register")]
+    [AllowAnonymous]
     [EnableRateLimiting("auth")]
     public async Task<IActionResult> Register(RegisterRequest request, CancellationToken cancellationToken)
     {

@@ -8,7 +8,7 @@ The audit is evidence-driven. PASS means a command, HTTP call, test, or browser 
 |---|---|---|
 | 1. Baseline | **DONE** | Build, tests, install, typecheck, lint, dependency audits, local fresh-stack startup, and repository search completed. Docker is unavailable, so local startup was used. |
 | 2. Feature checklist | **PARTIAL** | Core invite/approval/payment journey and some auth/file cases pass. Many individual workflows and state transitions still need explicit verification. |
-| 3. Security and isolation | **PARTIAL** | Generated route authorization tests pass; key B-vs-A scenarios pass. Full route-by-route table and remaining security checks are pending. |
+| 3. Security and isolation | **PARTIAL** | The full 84-operation API route inventory, anonymous/admin authorization generation, Client A/B API checks, and SignalR join isolation are now covered and passing. Broader security controls remain unverified. |
 | 4. End-to-end scenario | **DONE, WITH LIMITATION** | Playwright completes invite through receipt and checks Client B isolation using a signed local webhook. Stripe PaymentIntent creation could not be verified without a real Stripe secret. |
 | 5. UI quality sweep | **PARTIAL** | Three Playwright tests pass, covering the home views, all requested viewport/theme pairs, direct routes, refresh, Back, overflow and browser console errors. Other pages/states and full keyboard/focus review remain. |
 | 6. Docs and cleanup | **PARTIAL** | README, `.gitignore`, screenshots, and this report were updated. The final route table, all checklist evidence, and known-limitations review remain. |
@@ -75,13 +75,102 @@ Statuses are **PASS**, **FIXED**, or **NOT YET VERIFIED**. Items marked partial 
 
 ## Phase 3 — Security and isolation
 
-`RouteAuthorizationTests` passes all three generated tests:
+`dotnet test backend/ClientHub.slnx --filter FullyQualifiedName~RouteAuthorizationTests` passes **5/5**. Its generated inventory is compared against every `ApiDescription` operation (84 operations across 65 paths), and asserts that each is explicitly protected or anonymous. Tests iterate every protected API operation for anonymous 401s and every Admin-only operation for both Client Owner and Member 403s. A client-scoped fixture checks Client A against actual Client B projects, comments, files, request/attachment, invoice, milestone and notification records; collection responses (including overview) omit B identifiers. It also checks request creation ignores a spoofed B client ID, Client A cannot mark B's notification read via read-all, and a real TestServer SignalR connection attempt to B's project is closed.
 
-- Every protected API route in the API description inventory returns 401 to an anonymous request.
-- Every Admin-only route returns 403 to both seeded Client Owner and Client Member tokens.
-- Cross-client project/file/zip/invoice/PDF/receipt/request/approval/notification reads or decisions return 404; client list routes do not contain Client B identifiers; `/api/me/team` and `/api/me/billing` omit Client B data.
+The route-inventory assertion exposed `/api/auth/login` and `/api/auth/register` without explicit authorization metadata. Both were explicitly marked `[AllowAnonymous]`; runtime behavior is unchanged, and the full generated route suite now passes.
 
-The Swagger inventory contains **84 method/path operations across 65 paths**. The final report still needs the required per-operation method/route/role/isolation table and coverage for every client-scoped endpoint, SignalR group joins, null-ClientId behavior, and remaining security checks (CORS/security headers, logs, token/password hashes, SQL parameters, and upload path handling).
+**API route matrix (84 Swagger method/path operations).** “Yes” means the Client A/B fixture issues a foreign-resource request or checks a scoped collection/write. “N/A” means no client resource is addressable on that route (or the endpoint is Admin-only and its 403 is checked in the generated role test). “No” is an outstanding gap.
+
+| Method | Route | Required role | Client A/B isolation tested |
+|---|---|---|---|
+| GET | `/api/admin/clients` | Admin | N/A |
+| POST | `/api/admin/clients` | Admin | N/A |
+| GET | `/api/admin/clients/{clientId}` | Admin | N/A |
+| PUT | `/api/admin/clients/{clientId}` | Admin | N/A |
+| GET | `/api/admin/clients/{clientId}/invitations` | Admin | N/A |
+| POST | `/api/admin/clients/{clientId}/invitations` | Admin | N/A |
+| DELETE | `/api/admin/clients/{clientId}/invitations/{invitationId}` | Admin | N/A |
+| POST | `/api/admin/clients/{clientId}/invitations/{invitationId}/resend` | Admin | N/A |
+| PUT | `/api/admin/clients/{clientId}/owner` | Admin | N/A |
+| PATCH | `/api/admin/clients/{clientId}/status` | Admin | N/A |
+| PATCH | `/api/admin/clients/{clientId}/users/{userId}/status` | Admin | N/A |
+| GET | `/api/admin/dashboard` | Admin | N/A |
+| POST | `/api/admin/requests/{requestId}/convert` | Admin | N/A |
+| PATCH | `/api/admin/requests/{requestId}/decision` | Admin | N/A |
+| PATCH | `/api/admin/requests/{requestId}/review` | Admin | N/A |
+| GET | `/api/admin/workspace-settings` | Admin | N/A |
+| PUT | `/api/admin/workspace-settings` | Admin | N/A |
+| GET | `/api/approvals` | Admin or Client | Yes |
+| POST | `/api/auth/change-password` | Authenticated | N/A |
+| POST | `/api/auth/forgot-password` | Anonymous | N/A |
+| GET | `/api/auth/invitations/{token}` | Anonymous | N/A |
+| POST | `/api/auth/invitations/{token}/accept` | Anonymous | N/A |
+| POST | `/api/auth/login` | Anonymous | N/A |
+| POST | `/api/auth/logout` | Anonymous | N/A |
+| POST | `/api/auth/logout-all` | Authenticated | N/A |
+| GET | `/api/auth/me` | Authenticated | N/A |
+| PUT | `/api/auth/profile` | Authenticated | N/A |
+| POST | `/api/auth/refresh` | Anonymous | N/A |
+| POST | `/api/auth/register` | Anonymous | N/A |
+| POST | `/api/auth/reset-password` | Anonymous | N/A |
+| GET | `/api/invoices` | Authenticated | Yes |
+| POST | `/api/invoices` | Admin | N/A |
+| DELETE | `/api/invoices/{invoiceId}` | Admin | N/A |
+| GET | `/api/invoices/{invoiceId}` | Authenticated | Yes |
+| PUT | `/api/invoices/{invoiceId}` | Admin | N/A |
+| POST | `/api/invoices/{invoiceId}/payment-intent` | Authenticated | Yes |
+| GET | `/api/invoices/{invoiceId}/pdf` | Authenticated | Yes |
+| GET | `/api/invoices/{invoiceId}/receipt.pdf` | Authenticated | Yes |
+| POST | `/api/invoices/{invoiceId}/send` | Admin | N/A |
+| PATCH | `/api/invoices/{invoiceId}/status` | Admin | N/A |
+| GET | `/api/invoices/export.csv` | Admin | N/A |
+| GET | `/api/me/billing` | Client | Yes |
+| PUT | `/api/me/billing` | Client (Owner for update) | N/A |
+| GET | `/api/me/overview` | Client | Yes |
+| GET | `/api/me/team` | Client Owner | Yes |
+| PATCH | `/api/me/team/{userId}/deactivate` | Client Owner | Yes |
+| POST | `/api/me/team/invitations` | Client Owner | N/A |
+| GET | `/api/notifications` | Authenticated | Yes |
+| PATCH | `/api/notifications/{notificationId}/read` | Authenticated | Yes |
+| GET | `/api/notifications/preferences` | Authenticated | N/A |
+| PUT | `/api/notifications/preferences` | Authenticated | N/A |
+| POST | `/api/notifications/read-all` | Authenticated | Yes |
+| POST | `/api/payments/stripe-webhook` | Anonymous (signature required) | N/A |
+| GET | `/api/projects` | Authenticated | Yes |
+| POST | `/api/projects` | Admin | N/A |
+| GET | `/api/projects/{projectId}` | Authenticated | Yes |
+| PUT | `/api/projects/{projectId}` | Admin | N/A |
+| GET | `/api/projects/{projectId}/activity` | Authenticated | Yes |
+| POST | `/api/projects/{projectId}/archive` | Admin | N/A |
+| GET | `/api/projects/{projectId}/comments` | Authenticated | Yes |
+| POST | `/api/projects/{projectId}/comments` | Authenticated | Yes |
+| DELETE | `/api/projects/{projectId}/comments/{commentId}` | Authenticated (author/admin) | Yes |
+| PUT | `/api/projects/{projectId}/comments/{commentId}` | Authenticated (author/admin) | Yes |
+| GET | `/api/projects/{projectId}/files` | Authenticated | Yes |
+| POST | `/api/projects/{projectId}/files` | Authenticated | Yes |
+| GET | `/api/projects/{projectId}/files.zip` | Authenticated | Yes |
+| DELETE | `/api/projects/{projectId}/files/{fileId}` | Authenticated (uploader/admin) | Yes |
+| GET | `/api/projects/{projectId}/files/{fileId}` | Authenticated | Yes |
+| PATCH | `/api/projects/{projectId}/files/{fileId}` | Authenticated (uploader/admin) | Yes |
+| GET | `/api/projects/{projectId}/files/{fileId}/preview` | Authenticated | Yes |
+| POST | `/api/projects/{projectId}/milestones` | Admin | N/A |
+| DELETE | `/api/projects/{projectId}/milestones/{milestoneId}` | Admin | N/A |
+| PUT | `/api/projects/{projectId}/milestones/{milestoneId}` | Admin | N/A |
+| POST | `/api/projects/{projectId}/milestones/{milestoneId}/approval-decision` | Client | Yes |
+| POST | `/api/projects/{projectId}/milestones/{milestoneId}/approval-request` | Admin | N/A |
+| PATCH | `/api/projects/{projectId}/milestones/{milestoneId}/completion` | Admin | N/A |
+| PUT | `/api/projects/{projectId}/milestones/reorder` | Admin | N/A |
+| PATCH | `/api/projects/{projectId}/status` | Admin | N/A |
+| GET | `/api/requests` | Authenticated | Yes |
+| POST | `/api/requests` | Client | Yes |
+| DELETE | `/api/requests/{requestId}` | Client | Yes |
+| GET | `/api/requests/{requestId}` | Authenticated | Yes |
+| POST | `/api/requests/{requestId}/attachments` | Client | Yes |
+| GET | `/api/requests/{requestId}/attachments/{attachmentId}` | Authenticated | Yes |
+
+SignalR is not an API-description operation; it has a separate `ClientACannotJoinClientBProjectSignalRGroup` WebSocket test.
+
+The rest of the Phase 3 security audit remains partial/not verified: null-ClientId exhaustive coverage, CORS/security-header review, log PII, secret/token/password hash audit, SQL parameterization, and full upload path traversal behavior.
 
 ## Phase 4 — End-to-end scenario
 
