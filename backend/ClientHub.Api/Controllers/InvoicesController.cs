@@ -142,6 +142,7 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         if (!InvoiceRules.CanTransition(invoice.Status, InvoiceStatus.Sent))
             return Conflict(new { message = "This invoice cannot be sent in its current state." });
         invoice.Status = InvoiceStatus.Sent;
+        await AddInvoiceNotificationsAsync(invoice.ClientId, $"Invoice {invoice.Number} is ready for payment.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -159,6 +160,8 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
             return Conflict(new { message = $"An invoice cannot move from {invoice.Status} to {nextStatus}." });
         if (invoice.Status == nextStatus) return NoContent();
         invoice.Status = nextStatus;
+        if (nextStatus == InvoiceStatus.Overdue)
+            await AddInvoiceNotificationsAsync(invoice.ClientId, $"Invoice {invoice.Number} is overdue.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return NoContent();
     }
@@ -208,6 +211,16 @@ public sealed class InvoicesController(ClientHubDbContext db, InvoicePdfService 
         if (trimmed.Length > 0 && trimmed[0] is '=' or '+' or '-' or '@')
             value = $"'{value}";
         return $"\"{value.Replace("\"", "\"\"")}\"";
+    }
+
+    private async Task AddInvoiceNotificationsAsync(Guid clientId, string message, CancellationToken cancellationToken)
+    {
+        var recipientIds = await db.Users
+            .Where(user => user.ClientId == clientId && user.IsActive &&
+                (user.NotificationPreference == null || user.NotificationPreference.InvoiceReminders))
+            .Select(user => user.Id).ToListAsync(cancellationToken);
+        foreach (var recipientId in recipientIds)
+            db.Notifications.Add(new Notification { UserId = recipientId, Type = "Invoice reminder", Message = message });
     }
 
     public sealed record CreateInvoiceRequest(Guid ClientId, Guid? ProjectId, DateOnly DueDate, string Currency, List<InvoiceLineRequest> Lines);

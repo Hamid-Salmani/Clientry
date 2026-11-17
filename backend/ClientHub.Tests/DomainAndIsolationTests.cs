@@ -99,6 +99,8 @@ public sealed class DomainAndIsolationTests
                 new Payment { InvoiceId = invoiceB.Id, StripePaymentIntentId = "payment-b", Amount = 200, Status = "Succeeded" },
                 new Notification { UserId = userA, Type = "test", Message = "A notification" },
                 new Notification { UserId = userB, Type = "test", Message = "B notification" },
+                new UserNotificationPreference { UserId = userA, WorkspaceUpdates = false, InvoiceReminders = true },
+                new UserNotificationPreference { UserId = userB, WorkspaceUpdates = true, InvoiceReminders = false },
                 new ActivityLog { ClientId = clientA.Id, ProjectId = projectA.Id, ActorId = userA, Action = "A", Metadata = "" },
                 new ActivityLog { ClientId = clientB.Id, ProjectId = projectB.Id, ActorId = Guid.NewGuid(), Action = "B", Metadata = "" });
             await seed.SaveChangesAsync();
@@ -116,6 +118,7 @@ public sealed class DomainAndIsolationTests
         Assert.Equal(["Work A"], await tenant.InvoiceLineItems.Select(x => x.Description).ToListAsync());
         Assert.Equal(["payment-a"], await tenant.Payments.Select(x => x.StripePaymentIntentId).ToListAsync());
         Assert.Equal(["A notification"], await tenant.Notifications.Select(x => x.Message).ToListAsync());
+        Assert.Equal([userA], await tenant.NotificationPreferences.Select(x => x.UserId).ToListAsync());
         Assert.Equal(["A"], await tenant.ActivityLogs.Select(x => x.Action).ToListAsync());
         Assert.False(await tenant.Projects.AnyAsync(x => x.Id == projectB.Id));
         Assert.False(await tenant.Invoices.AnyAsync(x => x.Id == invoiceB.Id));
@@ -125,6 +128,7 @@ public sealed class DomainAndIsolationTests
         Assert.Empty(await missingClientScope.Clients.ToListAsync());
         Assert.Empty(await missingClientScope.Invitations.ToListAsync());
         Assert.Empty(await missingClientScope.Projects.ToListAsync());
+        Assert.Empty(await missingClientScope.NotificationPreferences.ToListAsync());
     }
 
     [Fact]

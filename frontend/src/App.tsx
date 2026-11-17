@@ -30,6 +30,8 @@ type Metrics = {
 }
 type Comment = { id: string; body: string; createdAt: string; author: string }
 type ProjectFile = { id: string; fileName: string; contentType: string; size: number; uploadedAt: string }
+type NotificationItem = { id: string; type: string; message: string; isRead: boolean; createdAt: string }
+type NotificationPreferences = { workspaceUpdates: boolean; invoiceReminders: boolean }
 
 const apiBase = import.meta.env.VITE_API_URL ?? ''
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? ''
@@ -82,9 +84,11 @@ function App() {
   const [activePage, setActivePage] = useState('Overview')
   const [openPopover, setOpenPopover] = useState<'search' | 'notifications' | 'workspace' | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [notificationsSeen, setNotificationsSeen] = useState(false)
-  const [workspaceUpdates, setWorkspaceUpdates] = useState(() => localStorage.getItem('clientry-workspace-updates') !== 'false')
-  const [invoiceReminders, setInvoiceReminders] = useState(() => localStorage.getItem('clientry-invoice-reminders') !== 'false')
+  const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([])
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
+  const [notificationLoading, setNotificationLoading] = useState(false)
+  const [workspaceUpdates, setWorkspaceUpdates] = useState(true)
+  const [invoiceReminders, setInvoiceReminders] = useState(true)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('clientry-theme')
     return savedTheme === 'light' || savedTheme === 'dark'
@@ -183,6 +187,16 @@ function App() {
   }, [token, loadData])
 
   useEffect(() => {
+    if (!token) return
+    request<NotificationPreferences>('/notifications/preferences', token)
+      .then((preferences) => {
+        setWorkspaceUpdates(preferences.workspaceUpdates)
+        setInvoiceReminders(preferences.invoiceReminders)
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load notification preferences.'))
+  }, [token])
+
+  useEffect(() => {
     if (!selectedProject || !token) return
     request<Comment[]>(`/projects/${selectedProject.id}/comments`, token)
       .then(setComments)
@@ -197,6 +211,52 @@ function App() {
     setToken('')
     setUser(null)
     setSelectedProject(null)
+    setNotificationItems([])
+    setUnreadNotificationCount(0)
+  }
+
+  async function loadNotifications() {
+    setNotificationLoading(true)
+    try {
+      const result = await request<{ items: NotificationItem[]; unreadCount: number }>('/notifications?page=1&pageSize=10', token)
+      setNotificationItems(result.items)
+      setUnreadNotificationCount(result.unreadCount)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load notifications.')
+    } finally {
+      setNotificationLoading(false)
+    }
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    const wasUnread = notificationItems.some((item) => item.id === notificationId && !item.isRead)
+    try {
+      await request<void>(`/notifications/${notificationId}/read`, token, { method: 'PATCH' })
+      setNotificationItems((items) => items.map((item) => item.id === notificationId ? { ...item, isRead: true } : item))
+      if (wasUnread) setUnreadNotificationCount((count) => Math.max(0, count - 1))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to update notification.')
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    try {
+      await request<void>('/notifications/read-all', token, { method: 'POST' })
+      setNotificationItems((items) => items.map((item) => ({ ...item, isRead: true })))
+      setUnreadNotificationCount(0)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to update notifications.')
+    }
+  }
+
+  async function saveNotificationPreferences(next: NotificationPreferences) {
+    try {
+      await request<void>('/notifications/preferences', token, { method: 'PUT', body: JSON.stringify(next) })
+      setWorkspaceUpdates(next.workspaceUpdates)
+      setInvoiceReminders(next.invoiceReminders)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to save notification preferences.')
+    }
   }
 
   async function logIn(event: FormEvent) {
@@ -332,14 +392,14 @@ function App() {
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-separator">/</span><strong>{selectedProject?.name ?? activePage}</strong></div>
           <div className="topbar-actions" ref={actionsRef}>
             <button className="icon-button search-button" aria-label="Search workspace" aria-expanded={openPopover === 'search'} onClick={() => { setSearchTerm(''); setOpenPopover(openPopover === 'search' ? null : 'search') }}><Icon name="search" /></button>
-            <button className="icon-button notification-button" aria-label="Notifications" aria-expanded={openPopover === 'notifications'} onClick={() => { setOpenPopover(openPopover === 'notifications' ? null : 'notifications'); setNotificationsSeen(true) }}><Icon name="bell" />{!notificationsSeen && <i />}</button>
+            <button className="icon-button notification-button" aria-label="Notifications" aria-expanded={openPopover === 'notifications'} onClick={() => { const opening = openPopover !== 'notifications'; setOpenPopover(opening ? 'notifications' : null); if (opening) void loadNotifications() }}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
             <div className="topbar-divider" />
             <button className="topbar-avatar" aria-label={`Open ${user.name}'s account`} onClick={() => navigateTo('Account')}>{user.name.split(' ').map((part) => part[0]).join('').slice(0, 2)}</button>
             {openPopover === 'search' && <div className="popover search-popover" role="dialog" aria-label="Search workspace">
               <label className="search-field"><Icon name="search" /><input ref={searchInputRef} value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setOpenPopover(null) }} placeholder="Search projects, invoices, clients..." /><button className="icon-button" onClick={() => setOpenPopover(null)} aria-label="Close search"><Icon name="close" /></button></label>
               <SearchResults term={searchTerm} projects={projects} invoices={invoices} clients={admin ? clients : []} onOpenProject={(project) => { setSelectedProject(project); setOpenPopover(null) }} onOpenInvoices={() => navigateTo('Invoices')} onOpenClients={() => navigateTo('Clients')} />
             </div>}
-            {openPopover === 'notifications' && <NotificationsPopover admin={admin} projects={projects} invoices={invoices} activity={metrics?.recentActivity ?? []} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onOpenProject={(project) => { setSelectedProject(project); setOpenPopover(null) }} onOpenInvoices={() => navigateTo('Invoices')} />}
+            {openPopover === 'notifications' && <NotificationsPopover items={notificationItems} unreadCount={unreadNotificationCount} loading={notificationLoading} onMarkRead={(id) => void markNotificationRead(id)} onMarkAllRead={() => void markAllNotificationsRead()} />}
           </div>
         </header>
 
@@ -355,7 +415,7 @@ function App() {
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} />
           ) : activePage === 'Settings' ? (
-            <Settings workspaceName={workspaceName} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => { setWorkspaceUpdates(enabled); localStorage.setItem('clientry-workspace-updates', String(enabled)) }} onInvoiceRemindersChange={(enabled) => { setInvoiceReminders(enabled); localStorage.setItem('clientry-invoice-reminders', String(enabled)) }} />
+            <Settings workspaceName={workspaceName} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
           ) : activePage === 'Account' ? (
             <Account user={user} workspaceName={workspaceName} onSignOut={signOut} />
           ) : (
@@ -425,44 +485,20 @@ function SearchResults({ term, projects, invoices, clients, onOpenProject, onOpe
     : <p className="popover-hint">No matching projects, invoices, or clients.</p>
 }
 
-function NotificationsPopover({ admin, projects, invoices, activity, workspaceUpdates, invoiceReminders, onOpenProject, onOpenInvoices }: {
-  admin: boolean
-  projects: Project[]
-  invoices: Invoice[]
-  activity: Metrics['recentActivity']
-  workspaceUpdates: boolean
-  invoiceReminders: boolean
-  onOpenProject: (project: Project) => void
-  onOpenInvoices: () => void
+function NotificationsPopover({ items, unreadCount, loading, onMarkRead, onMarkAllRead }: {
+  items: NotificationItem[]
+  unreadCount: number
+  loading: boolean
+  onMarkRead: (id: string) => void
+  onMarkAllRead: () => void
 }) {
-  const entries: { key: string; title: string; detail: string; when: string; action?: () => void }[] = admin
-    ? activity.filter((item) => /invoice|payment/i.test(`${item.action} ${item.metadata}`) ? invoiceReminders : workspaceUpdates).slice(0, 5).map((item, index) => ({
-      key: `activity-${item.createdAt}-${index}`, title: item.action, detail: item.metadata,
-      when: relativeDate(item.createdAt),
-    }))
-    : [
-      ...(workspaceUpdates ? projects.slice(0, 3).map((project) => ({
-        key: `project-${project.id}`, title: project.name,
-        detail: `${project.status.replace(/([A-Z])/g, ' $1').trim()} · ${project.progress}% complete`,
-        when: project.dueDate ? `Due ${new Date(project.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}` : 'Project update',
-        action: () => onOpenProject(project),
-      })) : []),
-      ...(invoiceReminders ? invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').slice(0, 2).map((invoice) => ({
-        key: `invoice-${invoice.id}`, title: `${invoice.number} needs attention`,
-        detail: `${invoice.status} · ${money(invoice.total)}`,
-        when: `Due ${new Date(invoice.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}`,
-        action: onOpenInvoices,
-      })) : []),
-    ].slice(0, 5)
   return <div className="popover notifications-popover" role="dialog" aria-label="Workspace notifications">
-    <div className="popover-title"><div><strong>Notifications</strong><span>{admin ? 'Recent studio activity' : 'Project and billing updates'}</span></div><span className="notification-count">{entries.length}</span></div>
-    {entries.length ? <div className="notification-list">{entries.map((entry) => {
-      const content = <><span className="notification-mark"><Icon name="bell" /></span><span className="notification-copy"><strong>{entry.title}</strong><span>{entry.detail}</span><small>{entry.when}</small></span></>
-      return entry.action
-        ? <button key={entry.key} className="notification-item" onClick={entry.action}>{content}</button>
-        : <div key={entry.key} className="notification-item">{content}</div>
-    })}</div> : <p className="popover-hint">You’re all caught up. New workspace updates will appear here.</p>}
-    {!admin && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <button className="popover-link" onClick={onOpenInvoices}>Review invoices <Icon name="arrow" /></button>}
+    <div className="popover-title"><div><strong>Notifications</strong><span>Your workspace updates</span></div><span className="notification-count">{unreadCount}</span></div>
+    {loading ? <p className="popover-hint">Loading notifications...</p> :
+      items.length ? <div className="notification-list">{items.map((item) => <button key={item.id} className={`notification-item${item.isRead ? '' : ' unread'}`} onClick={() => onMarkRead(item.id)}>
+        <span className="notification-mark"><Icon name="bell" /></span><span className="notification-copy"><strong>{item.type}</strong><span>{item.message}</span><small>{relativeDate(item.createdAt)}</small></span>
+      </button>)}</div> : <p className="popover-hint">You’re all caught up. New workspace updates will appear here.</p>}
+    {unreadCount > 0 && <button className="popover-link" onClick={onMarkAllRead}>Mark all as read</button>}
   </div>
 }
 
@@ -478,7 +514,7 @@ function Settings({ workspaceName, lightMode, onLightModeChange, workspaceUpdate
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>Settings<span className="heading-period">.</span></h1><p>Choose how you’d like to use {workspaceName}.</p></div></div>
     <section className="panel settings-panel">
-      <div className="panel-heading"><div><h2>Appearance & notifications</h2><p>Preferences are saved in this browser.</p></div><span className="settings-badge">PERSONAL</span></div>
+      <div className="panel-heading"><div><h2>Appearance & notifications</h2><p>Notification preferences are saved to your account.</p></div><span className="settings-badge">PERSONAL</span></div>
       <PreferenceToggle title="Light mode" description="Use a bright color palette throughout the workspace." checked={lightMode} onChange={onLightModeChange} />
       <PreferenceToggle title="Workspace updates" description="Show project and activity updates in your notification menu." checked={workspaceUpdates} onChange={onWorkspaceUpdatesChange} />
       <PreferenceToggle title="Invoice reminders" description="Keep upcoming and overdue invoices on your radar." checked={invoiceReminders} onChange={onInvoiceRemindersChange} />

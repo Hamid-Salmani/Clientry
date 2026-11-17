@@ -20,6 +20,7 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
     public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<UserNotificationPreference> NotificationPreferences => Set<UserNotificationPreference>();
     public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -35,6 +36,9 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<PasswordResetToken>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId)
             .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<UserNotificationPreference>().HasKey(x => x.UserId);
+        modelBuilder.Entity<UserNotificationPreference>().HasOne(x => x.User).WithOne(x => x.NotificationPreference)
+            .HasForeignKey<UserNotificationPreference>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<User>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
         modelBuilder.Entity<Client>().HasQueryFilter(x =>
@@ -61,6 +65,8 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
             !scope.IsClient || (scope.ClientId.HasValue && x.Invoice != null && x.Invoice.ClientId == scope.ClientId));
         modelBuilder.Entity<Notification>().HasQueryFilter(x =>
             !scope.IsClient || (scope.UserId.HasValue && x.UserId == scope.UserId));
+        modelBuilder.Entity<UserNotificationPreference>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && scope.UserId.HasValue && x.UserId == scope.UserId));
         modelBuilder.Entity<ActivityLog>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
         modelBuilder.Entity<Invoice>().Ignore(x => x.Total);

@@ -50,6 +50,19 @@ public sealed class StripeWebhookController(
             Amount = invoice.Total, Status = "Succeeded", PaidAt = DateTime.UtcNow
         });
         invoice.Status = InvoiceStatus.Paid;
+        var recipientIds = await db.Users
+            .Where(user => user.ClientId == invoice.ClientId && user.IsActive)
+            .Select(user => user.Id).ToListAsync(cancellationToken);
+        var optedOutIds = await db.NotificationPreferences
+            .Where(preference => recipientIds.Contains(preference.UserId) && !preference.WorkspaceUpdates)
+            .Select(preference => preference.UserId).ToListAsync(cancellationToken);
+        foreach (var recipientId in recipientIds.Except(optedOutIds))
+            db.Notifications.Add(new Notification
+            {
+                UserId = recipientId,
+                Type = "Payment received",
+                Message = $"Payment received for invoice {invoice.Number}."
+            });
         await db.SaveChangesAsync(cancellationToken);
         return Ok();
     }

@@ -476,6 +476,22 @@ namespace ClientHub.Infrastructure.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("ClientHub.Domain.UserNotificationPreference", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("InvoiceReminders")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("WorkspaceUpdates")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("NotificationPreferences");
+                });
+
             modelBuilder.Entity("ClientHub.Domain.Comment", b =>
                 {
                     b.HasOne("ClientHub.Domain.User", "Author")
@@ -589,6 +605,17 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Navigation("Client");
                 });
 
+            modelBuilder.Entity("ClientHub.Domain.UserNotificationPreference", b =>
+                {
+                    b.HasOne("ClientHub.Domain.User", "User")
+                        .WithOne("NotificationPreference")
+                        .HasForeignKey("ClientHub.Domain.UserNotificationPreference", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ClientHub.Domain.Client", b =>
                 {
                     b.Navigation("Invoices");
@@ -612,6 +639,11 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Navigation("Files");
 
                     b.Navigation("Milestones");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.User", b =>
+                {
+                    b.Navigation("NotificationPreference");
                 });
 #pragma warning restore 612, 618
         }

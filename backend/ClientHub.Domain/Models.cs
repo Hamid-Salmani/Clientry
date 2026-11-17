@@ -16,6 +16,7 @@ public sealed class User
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedUntil { get; set; }
     public Client? Client { get; set; }
+    public UserNotificationPreference? NotificationPreference { get; set; }
 }
 
 public sealed class Client
@@ -127,6 +128,14 @@ public sealed class Notification
     public required string Message { get; set; }
     public bool IsRead { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class UserNotificationPreference
+{
+    public Guid UserId { get; set; }
+    public bool WorkspaceUpdates { get; set; } = true;
+    public bool InvoiceReminders { get; set; } = true;
+    public User? User { get; set; }
 }
 
 public sealed class ActivityLog
