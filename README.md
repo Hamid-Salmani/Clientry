@@ -127,6 +127,8 @@ Sign in with a client demo account from the Demo accounts table, or accept an in
 
 Administrators manage client records, projects, milestones, invoices, and work requests from their separate workspace. Client accounts cannot access administrator-only routes or another client's data.
 
-## Current limitations
+## Known limitations
 
-This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and scheduled reminders, invoice numbers beyond generated unique identifiers, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.
+- Emails are sent synchronously through the configured SMTP server; durable delivery retries and scheduled reminders are outside the current implementation.
+- Invoice identifiers are unique, but sequential numbering is a remaining improvement.
+- Docker Compose could not be exercised in the audit environment because Docker is unavailable. The API, client, SQLite migrations, demo seed, and Mailpit were run locally instead.
