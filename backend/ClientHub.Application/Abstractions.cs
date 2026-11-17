@@ -18,3 +18,5 @@ public interface IEmailSender
 {
     Task SendAsync(string recipient, string subject, string htmlBody, IReadOnlyDictionary<string, byte[]>? attachments, CancellationToken cancellationToken);
 }
+
+public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);

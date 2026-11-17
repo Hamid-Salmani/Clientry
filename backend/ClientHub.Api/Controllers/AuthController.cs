@@ -39,6 +39,9 @@ public sealed class AuthController(
         if (user is null || !user.IsActive ||
             (user.LockedUntil.HasValue && user.LockedUntil > DateTime.UtcNow))
             return Unauthorized(new { message = "Email or password is incorrect." });
+        if (user.ClientId.HasValue &&
+            !await db.Clients.AnyAsync(x => x.Id == user.ClientId && x.IsActive, cancellationToken))
+            return Unauthorized(new { message = "Email or password is incorrect." });
 
         var hasher = new PasswordHasher<User>();
         if (hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password) == PasswordVerificationResult.Failed)
@@ -110,6 +113,8 @@ public sealed class AuthController(
 
         var invitation = await FindValidInvitationAsync(token, cancellationToken);
         if (invitation is null) return NotFound(new { message = "This invitation is invalid or has expired." });
+        if (!await db.Clients.AnyAsync(x => x.Id == invitation.ClientId && x.IsActive, cancellationToken))
+            return NotFound(new { message = "This invitation is invalid or has expired." });
         if (await db.Users.AnyAsync(x => x.Email.ToLower() == invitation.Email.ToLower(), cancellationToken))
             return Conflict(new { message = "An account with this email already exists." });
 
@@ -153,7 +158,8 @@ public sealed class AuthController(
         }
 
         var user = await db.Users.SingleOrDefaultAsync(x => x.Id == storedToken.UserId && x.IsActive, cancellationToken);
-        if (user is null)
+        if (user is null || (user.ClientId.HasValue &&
+            !await db.Clients.AnyAsync(x => x.Id == user.ClientId && x.IsActive, cancellationToken)))
         {
             storedToken.RevokedAt = now;
             await db.SaveChangesAsync(cancellationToken);

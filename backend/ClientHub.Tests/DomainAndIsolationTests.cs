@@ -258,6 +258,58 @@ public sealed class DomainAndIsolationTests
         Assert.NotNull(replacement.RevokedAt);
     }
 
+    [Fact]
+    public async Task LoginIsBlockedWhenTheOwningClientIsInactive()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        var client = new Client { CompanyName = "Inactive Client", Notes = "", IsActive = false };
+        var user = new User
+        {
+            Email = "inactive@example.test", FullName = "Inactive User", Role = UserRole.Client,
+            ClientId = client.Id, PasswordHash = ""
+        };
+        user.PasswordHash = new PasswordHasher<User>().HashPassword(user, "CorrectPass!234");
+
+        await using (var seed = new ClientHubDbContext(options, new TestScope(null, null, false)))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            seed.AddRange(client, user);
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        var result = await CreateAuthController(db).Login(
+            new AuthController.LoginRequest(user.Email, "CorrectPass!234"), CancellationToken.None);
+        Assert.IsType<UnauthorizedObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task AdminClientListAppliesSearchPaginationAndSorting()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        await db.Database.EnsureCreatedAsync();
+        db.Clients.AddRange(
+            new Client { CompanyName = "North Studio", Notes = "" },
+            new Client { CompanyName = "North Creative", Notes = "" },
+            new Client { CompanyName = "South Studio", Notes = "" });
+        await db.SaveChangesAsync();
+
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        var controller = new AdminController(db, new UnusedEmailSender(), configuration);
+        var result = Assert.IsType<OkObjectResult>(
+            await controller.Clients("north", 1, 1, "companyName", false, CancellationToken.None));
+        var page = Assert.IsType<PagedResult<object>>(result.Value);
+        Assert.Equal(2, page.Total);
+        Assert.Single(page.Items);
+        Assert.Equal(1, page.Page);
+        Assert.Equal(1, page.PageSize);
+    }
+
     private static AuthController CreateAuthController(ClientHubDbContext db)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -270,6 +322,13 @@ public sealed class DomainAndIsolationTests
             NullLogger<AuthController>.Instance);
     }
 
+    private sealed class UnusedEmailSender : IEmailSender
+    {
+        public Task SendAsync(string recipient, string subject, string htmlBody,
+            IReadOnlyDictionary<string, byte[]>? attachments, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Email is not used by this test.");
+    }
+
     private sealed record TestScope(Guid? ClientId, Guid? UserId, bool IsClient) : IRequestScope;
 
     private sealed class TestEnvironment : IWebHostEnvironment
@@ -280,13 +339,6 @@ public sealed class DomainAndIsolationTests
         public string EnvironmentName { get; set; } = "Testing";
         public string ContentRootPath { get; set; } = string.Empty;
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-    }
-
-    private sealed class UnusedEmailSender : IEmailSender
-    {
-        public Task SendAsync(string recipient, string subject, string htmlBody,
-            IReadOnlyDictionary<string, byte[]>? attachments, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Email is not used by this test.");
     }
 
     private sealed class UnusedFileStorage : IFileStorage

@@ -19,6 +19,7 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
     {
         var client = await db.Clients.SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
         if (client is null) return NotFound();
+        if (!client.IsActive) return Conflict(new { message = "Invitations cannot be created for an inactive client." });
         if (!TryNormalizeEmail(request.Email, out var email) ||
             string.IsNullOrWhiteSpace(request.FullName) || request.FullName.Trim().Length > 120)
             return BadRequest(new { message = "A valid email and name of at most 120 characters are required." });
@@ -71,6 +72,7 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
 
         var client = await db.Clients.SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
         if (client is null) return NotFound();
+        if (!client.IsActive) return Conflict(new { message = "Invitations cannot be resent for an inactive client." });
         var token = TokenSecurity.CreateToken();
         invitation.TokenHash = TokenSecurity.HashToken(token);
         invitation.ExpiresAt = DateTime.UtcNow.AddDays(7);
@@ -93,16 +95,137 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
     }
 
     [HttpGet("clients")]
-    public async Task<IActionResult> Clients(CancellationToken cancellationToken)
+    public async Task<IActionResult> Clients(
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? sortBy = "companyName",
+        [FromQuery] bool descending = false,
+        CancellationToken cancellationToken = default)
     {
-        var clients = await db.Clients.AsNoTracking().Include(x => x.Users).Include(x => x.Projects)
-            .OrderBy(x => x.CompanyName).ToListAsync(cancellationToken);
-        return Ok(clients.Select(x => new
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.Clients.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(search))
         {
-            x.Id, x.CompanyName,
-            contact = x.Users.Where(u => u.IsActive).Select(u => u.FullName).FirstOrDefault(),
-            activeProjects = x.Projects.Count(p => p.Status != ProjectStatus.Archived)
-        }));
+            var term = search.Trim().ToLowerInvariant();
+            query = query.Where(client =>
+                client.CompanyName.ToLower().Contains(term) ||
+                client.Notes.ToLower().Contains(term) ||
+                client.Users.Any(user => user.FullName.ToLower().Contains(term) || user.Email.ToLower().Contains(term)));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var ordered = (sortBy?.ToLowerInvariant(), descending) switch
+        {
+            ("projectcount", false) => query.OrderBy(client => client.Projects.Count(project => project.Status != ProjectStatus.Archived)),
+            ("projectcount", true) => query.OrderByDescending(client => client.Projects.Count(project => project.Status != ProjectStatus.Archived)),
+            ("status", false) => query.OrderBy(client => client.IsActive),
+            ("status", true) => query.OrderByDescending(client => client.IsActive),
+            (_, true) => query.OrderByDescending(client => client.CompanyName),
+            _ => query.OrderBy(client => client.CompanyName)
+        };
+        var clients = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(client => new
+            {
+                client.Id,
+                client.CompanyName,
+                contact = client.Users.Where(user => user.IsActive).OrderBy(user => user.FullName)
+                    .Select(user => user.FullName).FirstOrDefault(),
+                activeProjects = client.Projects.Count(project => project.Status != ProjectStatus.Archived),
+                client.IsActive
+            }).ToListAsync(cancellationToken);
+        return Ok(new PagedResult<object>(clients.Cast<object>().ToArray(), total, page, pageSize));
+    }
+
+    [HttpPost("clients")]
+    public async Task<IActionResult> CreateClient(ClientRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryValidateClient(request, out var companyName, out var notes, out var error))
+            return BadRequest(new { message = error });
+        var client = new Client { CompanyName = companyName, Notes = notes };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync(cancellationToken);
+        return CreatedAtAction(nameof(ClientDetails), new { clientId = client.Id }, new { client.Id });
+    }
+
+    [HttpGet("clients/{clientId:guid}")]
+    public async Task<IActionResult> ClientDetails(Guid clientId, CancellationToken cancellationToken)
+    {
+        var client = await db.Clients.AsNoTracking().Include(x => x.Users)
+            .SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
+        if (client is null) return NotFound();
+        var outstandingBalance = await db.InvoiceLineItems
+            .Where(line => line.Invoice!.ClientId == clientId &&
+                (line.Invoice.Status == InvoiceStatus.Sent || line.Invoice.Status == InvoiceStatus.Overdue))
+            .SumAsync(line => (decimal?)(line.Quantity * line.UnitPrice), cancellationToken) ?? 0m;
+        var lifetimeRevenue = await db.Payments
+            .Where(payment => payment.Invoice!.ClientId == clientId && payment.Status == "Succeeded")
+            .SumAsync(payment => (decimal?)payment.Amount, cancellationToken) ?? 0m;
+        return Ok(new
+        {
+            client.Id,
+            client.CompanyName,
+            client.Notes,
+            client.IsActive,
+            projectCount = await db.Projects.CountAsync(project => project.ClientId == clientId, cancellationToken),
+            outstandingBalance,
+            lifetimeRevenue,
+            users = client.Users.OrderBy(user => user.FullName).Select(user => new
+            {
+                user.Id, user.FullName, user.Email, user.IsActive
+            })
+        });
+    }
+
+    [HttpPut("clients/{clientId:guid}")]
+    public async Task<IActionResult> UpdateClient(Guid clientId, ClientRequest request, CancellationToken cancellationToken)
+    {
+        var client = await db.Clients.SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
+        if (client is null) return NotFound();
+        if (!TryValidateClient(request, out var companyName, out var notes, out var error))
+            return BadRequest(new { message = error });
+        client.CompanyName = companyName;
+        client.Notes = notes;
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPatch("clients/{clientId:guid}/status")]
+    public async Task<IActionResult> SetClientStatus(Guid clientId, SetActiveRequest request, CancellationToken cancellationToken)
+    {
+        var client = await db.Clients.SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
+        if (client is null) return NotFound();
+        client.IsActive = request.IsActive;
+        if (!client.IsActive)
+        {
+            var userIds = db.Users.Where(user => user.ClientId == clientId).Select(user => user.Id);
+            var refreshTokens = await db.RefreshTokens
+                .Where(token => userIds.Contains(token.UserId) && !token.RevokedAt.HasValue)
+                .ToListAsync(cancellationToken);
+            var now = DateTime.UtcNow;
+            foreach (var refreshToken in refreshTokens) refreshToken.RevokedAt = now;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPatch("clients/{clientId:guid}/users/{userId:guid}/status")]
+    public async Task<IActionResult> SetClientUserStatus(Guid clientId, Guid userId, SetActiveRequest request, CancellationToken cancellationToken)
+    {
+        var user = await db.Users.SingleOrDefaultAsync(x =>
+            x.Id == userId && x.ClientId == clientId && x.Role == UserRole.Client, cancellationToken);
+        if (user is null) return NotFound();
+        user.IsActive = request.IsActive;
+        if (!user.IsActive)
+        {
+            var now = DateTime.UtcNow;
+            var refreshTokens = await db.RefreshTokens.Where(x => x.UserId == userId && !x.RevokedAt.HasValue)
+                .ToListAsync(cancellationToken);
+            foreach (var refreshToken in refreshTokens) refreshToken.RevokedAt = now;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
     }
 
     [HttpGet("dashboard")]
@@ -156,5 +279,20 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
             string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool TryValidateClient(ClientRequest request, out string companyName, out string notes, out string error)
+    {
+        companyName = request.CompanyName?.Trim() ?? string.Empty;
+        notes = request.Notes?.Trim() ?? string.Empty;
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(companyName) || companyName.Length > 160 || notes.Length > 4000)
+        {
+            error = "Company name is required (max 160 characters) and notes must be at most 4,000 characters.";
+            return false;
+        }
+        return true;
+    }
+
+    public sealed record ClientRequest(string CompanyName, string Notes);
+    public sealed record SetActiveRequest(bool IsActive);
     public sealed record InvitationRequest(string Email, string FullName);
 }

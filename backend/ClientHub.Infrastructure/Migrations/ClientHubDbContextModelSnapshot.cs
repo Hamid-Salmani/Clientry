@@ -58,6 +58,9 @@ namespace ClientHub.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("TEXT");

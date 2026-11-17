@@ -157,10 +157,10 @@ function App() {
       if (currentUser.role === 'Admin') {
         const [dashboard, clientData] = await Promise.all([
           request<Metrics>('/admin/dashboard', authToken),
-          request<typeof clients>('/admin/clients', authToken),
+          request<{ items: typeof clients }>('/admin/clients?page=1&pageSize=100', authToken),
         ])
         setMetrics(dashboard)
-        setClients(clientData)
+        setClients(clientData.items)
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to load your workspace.')

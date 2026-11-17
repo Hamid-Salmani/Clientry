@@ -23,6 +23,7 @@ public sealed class Client
     public Guid Id { get; set; } = Guid.NewGuid();
     public required string CompanyName { get; set; }
     public required string Notes { get; set; }
+    public bool IsActive { get; set; } = true;
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<Project> Projects { get; set; } = new List<Project>();
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();

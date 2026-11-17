@@ -7,6 +7,7 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - Four-project .NET solution with a domain layer, application abstractions, EF Core infrastructure, and ASP.NET Core API.
 - SQLite persistence with EF Core migrations and demo seed data, JWT authentication, role checks, login throttling/lockout, tenant query filters, and resource-scoped file, invoice, project, and comment endpoints.
 - Project milestones and progress, comments with SignalR project groups, restricted local file uploads/downloads, generated invoice PDFs, and Stripe PaymentIntent/webhook handling.
+- Administrator client lifecycle management: search/paged client list, create/update, activation, client details, user status controls, and per-client invitations.
 - React + TypeScript frontend for client and admin workspaces, project detail, conversations, files, invoices, and basic admin overview/client list.
 - Dockerfiles, Compose services, Mailpit, and GitHub Actions build/test workflow.
 
@@ -90,4 +91,4 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 
 ## Current limitations
 
-This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and reminders, admin edit/deactivate workflows, CSV export, full pagination/search/sorting, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.
+This repository is a working portfolio foundation, not a fully production-ready implementation of every feature in the original specification. Email queue/retries and reminders, project/milestone management, full invoice workflows, CSV export, pagination/search on all list endpoints, and end-to-end Docker validation are not implemented yet. Mailpit is available in Compose for invitation and password-reset mail. Docker is needed to verify the composed stack and is not available in the authoring environment.
