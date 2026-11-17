@@ -32,6 +32,13 @@ type ProjectRequestItem = {
   adminNote?: string; convertedProjectId?: string; createdAt: string; updatedAt: string; clientName: string
   attachments: { id: string; fileName: string; contentType: string; size: number; uploadedAt: string }[]
 }
+type ClientOverviewData = {
+  pendingApprovals: ApprovalItem[]
+  unpaidInvoices: { id: string; number: string; dueDate: string; status: string; currency: string; amount: number }[]
+  unreadNotificationCount: number
+  recentProjectActivity: { projectId: string; projectName: string; action: string; metadata: string; createdAt: string }[]
+  nextMilestones: { id: string; projectId: string; title: string; dueDate: string; projectName: string }[]
+}
 type Invoice = {
   id: string; clientId: string; number: string; issueDate: string; dueDate: string
   status: string; total: number; currency: string
@@ -228,6 +235,11 @@ function App() {
   const approvalsQuery = useQuery({
     queryKey: ['approvals', token],
     queryFn: () => request<{ items: ApprovalItem[]; total: number }>('/approvals?page=1&pageSize=100', token),
+    enabled: Boolean(token && user?.role === 'Client'),
+  })
+  const clientOverviewQuery = useQuery({
+    queryKey: ['client-overview', token],
+    queryFn: () => request<ClientOverviewData>('/me/overview', token),
     enabled: Boolean(token && user?.role === 'Client'),
   })
   const projectContentQuery = useQuery({
@@ -460,7 +472,11 @@ function App() {
     }
   }
 
-  const greeting = useMemo(() => user?.name.split(' ')[0] ?? 'there', [user])
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours()
+    const timeOfDay = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+    return `${timeOfDay}, ${user?.name.split(' ')[0] ?? 'there'}`
+  }, [user])
   if (!token || !user) return <Login
     email={email}
     setEmail={setEmail}
@@ -536,7 +552,7 @@ function App() {
           {selectedProject ? (
             <ProjectDetail project={selectedProject} comments={comments} setComments={setComments} files={projectFiles} setFiles={setProjectFiles} token={token} currentUserId={user.id ?? ''} isAdmin={Boolean(admin)} commentText={commentText} setCommentText={setCommentText} onSubmit={addComment} onUpload={uploadFile} onDownload={downloadFile} onProjectChanged={() => refreshProject(selectedProject.id)} onBack={() => navigateTo('Projects')} />
           ) : activePage === 'Overview' ? (
-            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} supportEmail={supportEmail} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onCreateProject={() => setCreatingProject(true)} />
+            <Overview greeting={greeting} admin={admin} projects={projects} invoices={invoices} metrics={metrics} supportEmail={supportEmail} clientOverview={clientOverviewQuery.data ?? null} clientOverviewLoading={clientOverviewQuery.isLoading} clientOverviewError={clientOverviewQuery.error instanceof Error ? clientOverviewQuery.error.message : ''} onOpenProject={openProject} onOpenProjects={() => navigateTo('Projects')} onOpenInvoices={() => navigateTo('Invoices')} onOpenApprovals={() => navigateTo('Approvals')} onOpenNotifications={() => { setOpenPopover('notifications'); void loadNotifications() }} onCreateProject={() => setCreatingProject(true)} />
           ) : activePage === 'Projects' ? (
             <Projects projects={projects} admin={Boolean(admin)} onOpenProject={openProject} />
           ) : activePage === 'Approvals' ? (
@@ -690,20 +706,46 @@ function Account({ user, workspaceName, onSignOut }: { user: User; workspaceName
   </div>
 }
 
-function Overview({ greeting, admin, projects, invoices, metrics, supportEmail, onOpenProject, onOpenProjects, onOpenInvoices, onCreateProject }: {
+function Overview({ greeting, admin, projects, invoices, metrics, supportEmail, clientOverview, clientOverviewLoading, clientOverviewError, onOpenProject, onOpenProjects, onOpenInvoices, onOpenApprovals, onOpenNotifications, onCreateProject }: {
   greeting: string; admin: boolean; projects: Project[]; invoices: Invoice[]; metrics: Metrics | null; supportEmail: string
-  onOpenProject: (project: Project) => void; onOpenProjects: () => void; onOpenInvoices: () => void; onCreateProject: () => void
+  clientOverview: ClientOverviewData | null; clientOverviewLoading: boolean; clientOverviewError: string
+  onOpenProject: (project: Project) => void; onOpenProjects: () => void; onOpenInvoices: () => void
+  onOpenApprovals: () => void; onOpenNotifications: () => void; onCreateProject: () => void
 }) {
   const active = projects.filter((project) => project.status !== 'Archived')
   const outstanding = invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue')
   return <div className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>Good morning, {greeting}<span className="heading-period">.</span></h1><p>{admin ? 'Here’s what’s happening across your studio.' : 'Here’s the latest across your projects.'}</p></div>{admin && <button className="primary-button" onClick={onCreateProject}><span>＋</span> New project</button>}</div>
-    <div className="stats-grid">
+    <div className="page-heading"><div><div className="eyebrow">YOUR WORKSPACE</div><h1>{greeting}<span className="heading-period">.</span></h1><p>{admin ? 'Here’s what’s happening across your studio.' : 'Here’s the latest across your projects.'}</p></div>{admin && <button className="primary-button" onClick={onCreateProject}><span>＋</span> New project</button>}</div>
+    {admin && <div className="stats-grid">
       <StatCard label={admin ? 'Active projects' : 'Your projects'} value={admin ? metrics?.activeProjects : active.length} hint={admin ? 'Across all clients' : 'Currently in progress'} accent="lavender" />
       <StatCard label={admin ? 'Revenue this month' : 'Open invoices'} value={admin ? money(metrics?.revenueThisMonth ?? 0) : outstanding.length} hint={admin ? 'From paid invoices' : outstanding.length ? 'One needs your attention' : 'You’re all caught up'} accent="mint" />
       <StatCard label={admin ? 'Unpaid invoices' : 'Next milestone'} value={admin ? metrics?.unpaidInvoices : (active[0]?.milestones.filter((item) => !item.isCompleted).length ?? 0)} hint={admin ? `${metrics?.overdueInvoices ?? 0} overdue` : 'Coming up in your projects'} accent="peach" />
       <StatCard label={admin ? 'Clients' : 'Completed milestones'} value={admin ? metrics?.clientCount : active.reduce((sum, project) => sum + project.milestones.filter((item) => item.isCompleted).length, 0)} hint={admin ? 'Active relationships' : 'A little progress adds up'} accent="blue" />
-    </div>
+    </div>}
+    {!admin && <section className="attention-section" aria-labelledby="needs-attention-title">
+      <div className="panel-heading"><div><h2 id="needs-attention-title">Needs your attention</h2><p>Important updates and next steps across your workspace.</p></div></div>
+      {clientOverviewError && <div className="alert" role="alert">{clientOverviewError}</div>}
+      {clientOverviewLoading && !clientOverview && <div className="approval-skeletons" role="status" aria-label="Loading items needing attention"><i /><i /><i /></div>}
+      <div className="attention-cards">
+        <button className="attention-card" onClick={onOpenApprovals}><span>Pending approvals</span><strong>{clientOverview?.pendingApprovals.length ?? '—'}</strong><small>{clientOverview?.pendingApprovals.length ? 'Milestones waiting for your decision' : 'Nothing to review right now'}</small></button>
+        <button className="attention-card" onClick={onOpenInvoices}><span>Unpaid invoices</span><strong>{clientOverview ? money(clientOverview.unpaidInvoices.reduce((sum, invoice) => sum + invoice.amount, 0)) : '—'}</strong><small>{clientOverview ? `${clientOverview.unpaidInvoices.length} invoice${clientOverview.unpaidInvoices.length === 1 ? '' : 's'} due or overdue` : 'Loading invoice totals'}</small></button>
+        <button className="attention-card" onClick={onOpenNotifications}><span>Unread notifications</span><strong>{clientOverview?.unreadNotificationCount ?? '—'}</strong><small>Recent updates from your agency</small></button>
+      </div>
+      <div className="attention-details">
+        <section className="panel attention-detail-panel"><div className="panel-heading"><div><h2>Recent project activity</h2><p>Updates since your last visit.</p></div></div>
+          {clientOverview?.recentProjectActivity.length ? <div className="attention-activity-list">{clientOverview.recentProjectActivity.map((activity, index) => {
+            const project = projects.find((entry) => entry.id === activity.projectId)
+            return <button className="attention-activity-item" key={`${activity.createdAt}-${index}`} disabled={!project} onClick={() => project && onOpenProject(project)}><span><strong>{activity.action}</strong><small>{activity.projectName}{activity.metadata ? ` · ${activity.metadata}` : ''}</small></span><time>{relativeDate(activity.createdAt)}</time></button>
+          })}</div> : <EmptyState title="No new project activity" text="New updates will appear here after your next visit." />}
+        </section>
+        <section className="panel attention-detail-panel"><div className="panel-heading"><div><h2>Next milestones</h2><p>Upcoming dates across your projects.</p></div></div>
+          {clientOverview?.nextMilestones.length ? <div className="attention-activity-list">{clientOverview.nextMilestones.map((milestone) => <button className="attention-activity-item" key={milestone.id} onClick={() => {
+            const project = projects.find((entry) => entry.id === milestone.projectId)
+            if (project) onOpenProject(project)
+          }}><span><strong>{milestone.title}</strong><small>{milestone.projectName}</small></span><time>{new Date(milestone.dueDate).toLocaleDateString('en', { month: 'short', day: 'numeric' })}</time></button>)}</div> : <EmptyState title="No upcoming milestones" text="Future milestone dates will appear here." />}
+        </section>
+      </div>
+    </section>}
     <div className="overview-grid">
       <section className="panel projects-panel">
         <div className="panel-heading"><div><h2>{admin ? 'Project pulse' : 'Your projects'}</h2><p>{admin ? 'A quick look at work in motion.' : 'Everything you’re working on, at a glance.'}</p></div><button className="text-button" onClick={onOpenProjects}>View all <Icon name="arrow" /></button></div>

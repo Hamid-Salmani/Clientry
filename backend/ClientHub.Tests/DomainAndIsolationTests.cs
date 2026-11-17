@@ -295,6 +295,69 @@ public sealed class DomainAndIsolationTests
     }
 
     [Fact]
+    public async Task ClientOverviewIsTenantScopedAndTracksActivitySinceLastVisit()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Overview Client", Notes = "" };
+        var clientUser = new User
+        {
+            Email = "overview-client@example.test", FullName = "Client User", Role = UserRole.Client,
+            ClientId = client.Id, PasswordHash = "hash"
+        };
+        var project = new Project
+        {
+            ClientId = client.Id, Name = "Overview project", Description = "",
+            StartDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+        var invoice = new Invoice
+        {
+            ClientId = client.Id, Number = "OV-1", Currency = "USD", Status = InvoiceStatus.Overdue,
+            IssueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-10)),
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)),
+            Lines = [new InvoiceLineItem { Description = "Design", Quantity = 2, UnitPrice = 75 }]
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var seed = new ClientHubDbContext(options, new TestScope(null, null, false));
+        await seed.Database.EnsureCreatedAsync();
+        seed.AddRange(client, clientUser, project, invoice,
+            new Milestone
+            {
+                ClientId = client.Id, ProjectId = project.Id, Title = "Client review",
+                ApprovalStatus = MilestoneApprovalStatus.Pending, DueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2))
+            },
+            new Milestone
+            {
+                ClientId = client.Id, ProjectId = project.Id, Title = "Later milestone",
+                DueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(5))
+            },
+            new Notification { UserId = clientUser.Id, Type = "Invoice", Message = "Invoice is overdue" },
+            new ActivityLog
+            {
+                ClientId = client.Id, ProjectId = project.Id, ActorId = clientUser.Id,
+                Action = "File uploaded", Metadata = "brief.pdf", CreatedAt = DateTime.UtcNow.AddMinutes(-1)
+            });
+        await seed.SaveChangesAsync();
+
+        await using var db = new ClientHubDbContext(options, new TestScope(client.Id, clientUser.Id, true));
+        var controller = new ClientOverviewController(db);
+        SetAuthenticatedUser(controller, clientUser.Id, UserRole.Client, client.Id);
+        var firstResponse = Assert.IsType<OkObjectResult>(await controller.Overview(CancellationToken.None));
+        using var first = JsonDocument.Parse(JsonSerializer.Serialize(firstResponse.Value));
+        Assert.Single(first.RootElement.GetProperty("pendingApprovals").EnumerateArray());
+        var unpaid = first.RootElement.GetProperty("unpaidInvoices").EnumerateArray().Single();
+        Assert.Equal(150m, unpaid.GetProperty("amount").GetDecimal());
+        Assert.Equal(1, first.RootElement.GetProperty("unreadNotificationCount").GetInt32());
+        Assert.Single(first.RootElement.GetProperty("recentProjectActivity").EnumerateArray());
+        Assert.Single(first.RootElement.GetProperty("nextMilestones").EnumerateArray());
+        Assert.NotNull(await db.Users.Where(user => user.Id == clientUser.Id).Select(user => user.LastVisitedAt).SingleAsync());
+
+        var secondResponse = Assert.IsType<OkObjectResult>(await controller.Overview(CancellationToken.None));
+        using var second = JsonDocument.Parse(JsonSerializer.Serialize(secondResponse.Value));
+        Assert.Empty(second.RootElement.GetProperty("recentProjectActivity").EnumerateArray());
+    }
+
+    [Fact]
     public async Task DemoInitializationRepairsExistingClientCredentialsAndUnlocksThem()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

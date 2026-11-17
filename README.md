@@ -13,6 +13,7 @@ Clientry is a client portal concept for small service businesses. It brings proj
 - Invoice administration supports draft creation/editing/deletion, valid status transitions, verified-payment-only completion, PDF downloads, and CSV export.
 - User-scoped notifications provide paged retrieval, read/unread controls, and account-persisted workspace-update and invoice-reminder preferences; project and invoice changes generate notifications according to those preferences.
 - Clients can submit and track work requests with up to three validated attachments; administrators can filter the requests inbox, move new requests into review, accept or decline with a response, and convert eligible requests into projects.
+- The client home highlights pending approvals, outstanding invoice totals, unread notifications, activity since the user's previous visit, and the next milestone dates; the overview values are queried within the authenticated client's scope.
 - Administrators can persist the workspace display name and support email; client settings remain personal to their account.
 - Client workspace names and support contacts shown in the profile and overview are loaded from the authenticated account and saved workspace configuration; the sign-in page uses illustrative branding rather than sample project records.
 - The dashboard uses database-side counts and a six-month payment window; project, invoice, file, comment, activity, invitation, client, and notification collections support bounded pagination, with search or sorting where applicable.
@@ -102,6 +103,7 @@ Authentication supports administrator-issued, seven-day invitations, one-time pa
 
 - Only incomplete milestones can be sent for approval. A milestone can be re-requested after changes are requested; an approval decision is accepted only once per pending request. Approval completes the milestone, and a changes request requires a note.
 - Clients can cancel a work request only while it is new. Administrators may move new requests into review, decide new or in-review requests with a non-empty response, and convert accepted or in-review requests into projects. Request attachments use the existing 10 MB project-file allow-list and are limited to three per request.
+- The client home overview uses the authenticated user's previous overview visit; for a first visit it treats the prior seven days as the activity window, then persists the current visit timestamp.
 
 ## Current limitations
 

@@ -553,6 +553,9 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("LastVisitedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("LockedUntil")
                         .HasColumnType("TEXT");
 

@@ -18,6 +18,7 @@ public sealed class User
     public bool IsActive { get; set; } = true;
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedUntil { get; set; }
+    public DateTime? LastVisitedAt { get; set; }
     public Client? Client { get; set; }
     public UserNotificationPreference? NotificationPreference { get; set; }
 }
