@@ -4,6 +4,7 @@ using ClientHub.Api.Hubs;
 using ClientHub.Api.Services;
 using ClientHub.Application;
 using ClientHub.Infrastructure;
+using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,7 @@ builder.Services.AddScoped<InvoicePdfService>();
 builder.Services.AddDbContext<ClientHubDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("ClientHub") ?? "Data Source=clienthub.db"));
 builder.Services.AddControllers();
+builder.Services.AddValidatorsFromAssemblyContaining<ClientHub.Api.Validators.ProjectRequestValidator>();
 builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -39,6 +41,15 @@ builder.Services.AddRateLimiter(options =>
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0
         }));
+        options.AddPolicy("project-requests", context => RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0
+            }));
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 

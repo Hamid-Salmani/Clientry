@@ -13,6 +13,8 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectRequest> ProjectRequests => Set<ProjectRequest>();
+    public DbSet<ProjectRequestAttachment> ProjectRequestAttachments => Set<ProjectRequestAttachment>();
     public DbSet<Milestone> Milestones => Set<Milestone>();
     public DbSet<ProjectFile> ProjectFiles => Set<ProjectFile>();
     public DbSet<Comment> Comments => Set<Comment>();
@@ -33,6 +35,11 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
         modelBuilder.Entity<PasswordResetToken>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<Client>().HasMany(x => x.Users).WithOne(x => x.Client)
             .HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProjectRequest>().HasIndex(x => new { x.ClientId, x.CreatedAt });
+        modelBuilder.Entity<ProjectRequest>().HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId)
+            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<ProjectRequestAttachment>().HasOne(x => x.ProjectRequest).WithMany(x => x.Attachments)
+            .HasForeignKey(x => x.ProjectRequestId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<RefreshToken>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<PasswordResetToken>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId)
@@ -51,6 +58,10 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
         modelBuilder.Entity<PasswordResetToken>().HasQueryFilter(x =>
             !scope.IsClient || (scope.UserId.HasValue && x.UserId == scope.UserId));
         modelBuilder.Entity<Project>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<ProjectRequest>().HasQueryFilter(x =>
+            !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
+        modelBuilder.Entity<ProjectRequestAttachment>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));
         modelBuilder.Entity<Milestone>().HasQueryFilter(x =>
             !scope.IsClient || (scope.ClientId.HasValue && x.ClientId == scope.ClientId));

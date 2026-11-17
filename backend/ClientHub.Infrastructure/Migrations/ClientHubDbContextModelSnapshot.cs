@@ -413,6 +413,88 @@ namespace ClientHub.Infrastructure.Migrations
                     b.ToTable("ProjectFiles");
                 });
 
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdminNote")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ConvertedProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "CreatedAt");
+
+                    b.ToTable("ProjectRequests");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequestAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectRequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StoredPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectRequestId");
+
+                    b.ToTable("ProjectRequestAttachments");
+                });
+
             modelBuilder.Entity("ClientHub.Domain.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -623,6 +705,28 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequest", b =>
+                {
+                    b.HasOne("ClientHub.Domain.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequestAttachment", b =>
+                {
+                    b.HasOne("ClientHub.Domain.ProjectRequest", "ProjectRequest")
+                        .WithMany("Attachments")
+                        .HasForeignKey("ProjectRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ProjectRequest");
+                });
+
             modelBuilder.Entity("ClientHub.Domain.RefreshToken", b =>
                 {
                     b.HasOne("ClientHub.Domain.User", null)
@@ -676,6 +780,11 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Navigation("Files");
 
                     b.Navigation("Milestones");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequest", b =>
+                {
+                    b.Navigation("Attachments");
                 });
 
             modelBuilder.Entity("ClientHub.Domain.User", b =>

@@ -26,6 +26,12 @@ type ApprovalItem = {
   id: string; projectId: string; clientId: string; projectName: string; title: string
   dueDate?: string; requestedAt?: string; approvalStatus: 'Pending'
 }
+type ProjectRequestItem = {
+  id: string; clientId: string; createdById: string; title: string; description: string
+  priority: 'Low' | 'Normal' | 'High'; status: 'New' | 'InReview' | 'Accepted' | 'Declined' | 'Converted' | 'Cancelled'
+  adminNote?: string; convertedProjectId?: string; createdAt: string; updatedAt: string; clientName: string
+  attachments: { id: string; fileName: string; contentType: string; size: number; uploadedAt: string }[]
+}
 type Invoice = {
   id: string; clientId: string; number: string; issueDate: string; dueDate: string
   status: string; total: number; currency: string
@@ -138,6 +144,7 @@ function App() {
   const projectRouteId = location.pathname.match(/^\/projects\/([0-9a-f-]+)$/i)?.[1]
   const activePage = location.pathname.startsWith('/clients') ? 'Clients'
     : location.pathname.startsWith('/approvals') ? 'Approvals'
+    : location.pathname.startsWith('/requests') ? 'Requests'
     : location.pathname.startsWith('/projects') ? 'Projects'
       : location.pathname.startsWith('/invoices') ? 'Invoices'
         : location.pathname.startsWith('/settings') ? 'Settings'
@@ -487,9 +494,9 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          {(admin ? ['Overview', 'Projects', 'Invoices', 'Clients'] : ['Overview', 'Projects', 'Approvals', 'Invoices']).map((item) => (
+          {(admin ? ['Overview', 'Projects', 'Invoices', 'Clients', 'Requests'] : ['Overview', 'Projects', 'Approvals', 'Requests', 'Invoices']).map((item) => (
             <button key={item} className={`nav-item ${activePage === item ? 'active' : ''}`} aria-current={activePage === item ? 'page' : undefined} onClick={() => navigateTo(item)}>
-              <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Approvals' ? 'check' : item === 'Invoices' ? 'file' : 'users'} />{item}
+              <Icon name={item === 'Overview' ? 'grid' : item === 'Projects' ? 'layers' : item === 'Approvals' ? 'check' : item === 'Invoices' ? 'file' : item === 'Requests' ? 'upload' : 'users'} />{item}
               {item === 'Invoices' && invoices.some((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue') && <span className="nav-count">{invoices.filter((invoice) => invoice.status === 'Sent' || invoice.status === 'Overdue').length}</span>}
               {item === 'Approvals' && (approvalsQuery.data?.total ?? 0) > 0 && <span className="nav-count">{approvalsQuery.data?.total}</span>}
             </button>
@@ -534,6 +541,11 @@ function App() {
             <Projects projects={projects} admin={Boolean(admin)} onOpenProject={openProject} />
           ) : activePage === 'Approvals' ? (
             <Approvals items={approvalsQuery.data?.items ?? []} loading={approvalsQuery.isLoading} error={approvalsQuery.error instanceof Error ? approvalsQuery.error.message : ''} token={token} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['approvals', token] })} />
+          ) : activePage === 'Requests' ? (
+            <Requests token={token} admin={Boolean(admin)} clients={clients} path={location.pathname} onOpenProject={(id) => {
+              const project = projects.find((item) => item.id === id)
+              if (project) openProject(project)
+            }} />
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} admin={Boolean(admin)} clients={clients} onChanged={() => void queryClient.invalidateQueries({ queryKey: ['workspace', token] })} />
           ) : activePage === 'Settings' ? (
@@ -781,6 +793,191 @@ function Approvals({ items, loading, error, token, onChanged }: {
       </section>
     </div>}
   </div>
+}
+
+function Requests({ token, admin, clients, path, onOpenProject }: {
+  token: string; admin: boolean; clients: ClientSummary[]; path: string; onOpenProject: (id: string) => void
+}) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const detailId = path.match(/^\/requests\/([0-9a-f-]+)$/i)?.[1]
+  const creating = path === '/requests/new'
+  const [statusFilter, setStatusFilter] = useState('')
+  const [clientFilter, setClientFilter] = useState('')
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [priority, setPriority] = useState<ProjectRequestItem['priority']>('Normal')
+  const [files, setFiles] = useState<File[]>([])
+  const [decision, setDecision] = useState<'Accepted' | 'Declined' | null>(null)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const listQuery = useQuery({
+    queryKey: ['requests', token, statusFilter, clientFilter],
+    queryFn: () => request<{ items: ProjectRequestItem[]; total: number }>(
+      `/requests?page=1&pageSize=100${statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : ''}${admin && clientFilter ? `&clientId=${encodeURIComponent(clientFilter)}` : ''}`,
+      token,
+    ),
+    enabled: !detailId && !creating,
+  })
+  const detailQuery = useQuery({
+    queryKey: ['request', token, detailId],
+    queryFn: () => request<ProjectRequestItem>(`/requests/${detailId}`, token),
+    enabled: Boolean(detailId),
+  })
+  const item = detailQuery.data
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['requests', token] })
+    if (detailId) await queryClient.invalidateQueries({ queryKey: ['request', token, detailId] })
+  }
+
+  async function uploadAttachments(requestId: string, selectedFiles: File[]) {
+    if (selectedFiles.length > 3) throw new Error('You can add up to three files to a request.')
+    for (const file of selectedFiles) {
+      const body = new FormData()
+      body.append('file', file)
+      await request(`/requests/${requestId}/attachments`, token, { method: 'POST', body })
+    }
+  }
+
+  async function submitRequest(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try {
+      const created = await request<{ id: string }>('/requests', token, {
+        method: 'POST', body: JSON.stringify({ title, description, priority }),
+      })
+      try {
+        await uploadAttachments(created.id, files)
+      } catch (reason) {
+        setError(`Your request was saved, but an attachment could not be uploaded: ${reason instanceof Error ? reason.message : 'Upload failed.'}`)
+      }
+      await refresh()
+      navigate(`/requests/${created.id}`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to create your request.')
+    } finally { setBusy(false) }
+  }
+
+  async function performAction(action: 'cancel' | 'review' | 'convert' | 'decision', nextDecision?: 'Accepted' | 'Declined') {
+    if (!detailId) return
+    setBusy(true); setError('')
+    try {
+      if (action === 'cancel') await request(`/requests/${detailId}`, token, { method: 'DELETE' })
+      if (action === 'review') await request(`/admin/requests/${detailId}/review`, token, { method: 'PATCH' })
+      if (action === 'convert') {
+        const result = await request<{ id: string }>(`/admin/requests/${detailId}/convert`, token, { method: 'POST' })
+        await refresh()
+        onOpenProject(result.id)
+        return
+      }
+      if (action === 'decision' && nextDecision) {
+        await request(`/admin/requests/${detailId}/decision`, token, {
+          method: 'PATCH', body: JSON.stringify({ status: nextDecision, note }),
+        })
+        setDecision(null); setNote('')
+      }
+      await refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to update this request.')
+    } finally { setBusy(false) }
+  }
+
+  async function downloadAttachment(attachmentId: string, fileName: string) {
+    setBusy(true); setError('')
+    try {
+      const response = await fetch(`${apiBase}/api/requests/${detailId}/attachments/${attachmentId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) throw new Error(`Download failed (${response.status})`)
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url; link.download = fileName; link.click()
+      URL.revokeObjectURL(url)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to download this attachment.')
+    } finally { setBusy(false) }
+  }
+
+  if (creating) return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">PROJECT INTAKE</div><h1>New request<span className="heading-period">.</span></h1><p>Tell your agency what you need help with.</p></div></div>
+    {error && <div className="alert" role="alert">{error}</div>}
+    <form className="panel request-form" onSubmit={(event) => void submitRequest(event)}>
+      <label>Request title<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} required /></label>
+      <label>Describe the work<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={4000} rows={6} required /></label>
+      <label>Priority<select value={priority} onChange={(event) => setPriority(event.target.value as ProjectRequestItem['priority'])}><option>Low</option><option>Normal</option><option>High</option></select></label>
+      <label>Attachments (up to 3, 10 MB each)<input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 3))} /></label>
+      {files.length > 0 && <p className="request-file-hint">{files.length} file{files.length === 1 ? '' : 's'} selected</p>}
+      <div className="request-form-actions"><button type="button" className="cancel-button" onClick={() => navigate('/requests')}>Cancel</button><button className="primary-button" disabled={busy || !title.trim() || !description.trim()}>{busy ? 'Submitting…' : 'Submit request'}</button></div>
+    </form>
+  </div>
+
+  if (detailId) return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">PROJECT INTAKE</div><h1>Request details<span className="heading-period">.</span></h1><p>Track your request and the agency response.</p></div><button className="cancel-button" onClick={() => navigate('/requests')}>Back to requests</button></div>
+    {error && <div className="alert" role="alert">{error}</div>}
+    {detailQuery.isLoading ? <section className="panel full-panel"><div className="loading-bar" role="status" aria-label="Loading request" /></section> :
+      detailQuery.isError || !item ? <section className="panel full-panel"><EmptyState title="Request not found" text="This request may have been removed or is not available to your account." /></section> :
+        <section className="panel request-detail">
+          <div className="request-detail-heading"><div><span className={`status-pill status-${item.status.toLowerCase()}`}>{item.status === 'InReview' ? 'In review' : item.status}</span><span className={`status-pill request-priority priority-${item.priority.toLowerCase()}`}>{item.priority} priority</span></div><time>{new Date(item.createdAt).toLocaleDateString()}</time></div>
+          <h2>{item.title}</h2><p className="request-description">{item.description}</p>
+          {admin && <p className="request-client-name">Client: {item.clientName}</p>}
+          {item.adminNote && <div className="request-response"><strong>Agency response</strong><p>{item.adminNote}</p></div>}
+          {item.convertedProjectId && <button className="text-button" onClick={() => onOpenProject(item.convertedProjectId!)}>Open created project <Icon name="arrow" /></button>}
+          <div className="request-attachments"><strong>Attachments</strong>
+            {item.attachments.length ? item.attachments.map((file) => <button key={file.id} className="request-attachment" onClick={() => void downloadAttachment(file.id, file.fileName)} disabled={busy}><span>{file.fileName}<small>{formatBytes(file.size)}</small></span><Icon name="arrow" /></button>) : <span className="request-file-hint">No attachments</span>}
+          </div>
+          {!admin && item.status === 'New' && item.attachments.length < 3 && <label className="request-add-files">Add attachments<input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={(event) => {
+            const selected = Array.from(event.target.files ?? []).slice(0, 3 - item.attachments.length)
+            if (selected.length) {
+              setBusy(true); setError('')
+              void uploadAttachments(item.id, selected).then(refresh).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to upload attachments.')).finally(() => setBusy(false))
+            }
+            event.currentTarget.value = ''
+          }} /></label>}
+          <div className="request-detail-actions">
+            {!admin && item.status === 'New' && <button className="cancel-button" onClick={() => { if (window.confirm('Cancel this request?')) void performAction('cancel') }} disabled={busy}>Cancel request</button>}
+            {admin && item.status === 'New' && <button className="cancel-button" onClick={() => void performAction('review')} disabled={busy}>Move to review</button>}
+            {admin && ['New', 'InReview'].includes(item.status) && <><button className="primary-button" onClick={() => { setDecision('Accepted'); setNote('') }} disabled={busy}>Accept</button><button className="cancel-button" onClick={() => { setDecision('Declined'); setNote('') }} disabled={busy}>Decline</button></>}
+            {admin && ['Accepted', 'InReview'].includes(item.status) && <button className="primary-button" onClick={() => void performAction('convert')} disabled={busy}>Convert to project</button>}
+          </div>
+        </section>}
+    {decision && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setDecision(null) }}>
+      <section className="payment-modal project-modal approval-dialog" role="dialog" aria-modal="true" aria-labelledby="request-decision-title">
+        <button className="modal-close" onClick={() => setDecision(null)} aria-label="Close request decision">×</button><div className="eyebrow">REQUEST REVIEW</div>
+        <h2 id="request-decision-title">{decision === 'Accepted' ? 'Accept this request?' : 'Decline this request?'}</h2>
+        <form className="create-project-form" onSubmit={(event) => { event.preventDefault(); void performAction('decision', decision) }}>
+          <label>Response to client<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} required /></label>
+          {error && <p className="payment-error" role="alert">{error}</p>}
+          <div className="modal-actions"><button type="button" className="cancel-button" onClick={() => setDecision(null)} disabled={busy}>Cancel</button><button className="primary-button" disabled={busy || !note.trim()}>{busy ? 'Saving…' : `Confirm ${decision.toLowerCase()}`}</button></div>
+        </form>
+      </section>
+    </div>}
+  </div>
+
+  return <div className="page-enter">
+    <div className="page-heading"><div><div className="eyebrow">{admin ? 'CLIENT INTAKE' : 'PROJECT INTAKE'}</div><h1>{admin ? 'Requests inbox' : 'Your requests'}<span className="heading-period">.</span></h1><p>{admin ? 'Review incoming work from your clients.' : 'Submit new work and follow its progress.'}</p></div>
+      {!admin && <button className="primary-button" onClick={() => navigate('/requests/new')}>New request</button>}
+    </div>
+    <div className="request-filters">
+      <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{['New', 'InReview', 'Accepted', 'Declined', 'Converted', 'Cancelled'].map((value) => <option key={value} value={value}>{value === 'InReview' ? 'In review' : value}</option>)}</select></label>
+      {admin && <label>Client<select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}><option value="">All clients</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.companyName}</option>)}</select></label>}
+    </div>
+    <section className="panel full-panel request-list">
+      {listQuery.isLoading ? <div className="approval-skeletons" role="status" aria-label="Loading requests"><i /><i /><i /></div> :
+        listQuery.isError ? <div className="request-inline-error" role="alert">{listQuery.error instanceof Error ? listQuery.error.message : 'Unable to load requests.'}</div> :
+          listQuery.data?.items.length ? listQuery.data.items.map((requestItem) => <button key={requestItem.id} className="request-list-item" onClick={() => navigate(`/requests/${requestItem.id}`)}>
+            <span className="request-list-main"><strong>{requestItem.title}</strong><span>{admin ? requestItem.clientName : 'Submitted'} · {new Date(requestItem.createdAt).toLocaleDateString()}</span></span>
+            <span className={`status-pill status-${requestItem.status.toLowerCase()}`}>{requestItem.status === 'InReview' ? 'In review' : requestItem.status}</span>
+            <Icon name="arrow" />
+          </button>) : <EmptyState title={admin ? 'No matching requests' : 'No requests yet'} text={admin ? 'Requests from clients will appear here.' : 'Submit a work request when you need something new from your agency.'} />}
+    </section>
+  </div>
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function Invoices({ invoices, token, admin, clients, onChanged }: {

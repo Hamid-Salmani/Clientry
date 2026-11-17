@@ -199,7 +199,17 @@ public sealed class DomainAndIsolationTests
                 new UserNotificationPreference { UserId = userA, WorkspaceUpdates = false, InvoiceReminders = true },
                 new UserNotificationPreference { UserId = userB, WorkspaceUpdates = true, InvoiceReminders = false },
                 new ActivityLog { ClientId = clientA.Id, ProjectId = projectA.Id, ActorId = userA, Action = "A", Metadata = "" },
-                new ActivityLog { ClientId = clientB.Id, ProjectId = projectB.Id, ActorId = Guid.NewGuid(), Action = "B", Metadata = "" });
+                new ActivityLog { ClientId = clientB.Id, ProjectId = projectB.Id, ActorId = Guid.NewGuid(), Action = "B", Metadata = "" },
+                new ProjectRequest
+                {
+                    ClientId = clientA.Id, CreatedById = userA, Title = "A request", Description = "A request description",
+                    Attachments = [new ProjectRequestAttachment { ClientId = clientA.Id, FileName = "a.pdf", StoredPath = "a", ContentType = "application/pdf", Size = 1 }]
+                },
+                new ProjectRequest
+                {
+                    ClientId = clientB.Id, CreatedById = userB, Title = "B request", Description = "B request description",
+                    Attachments = [new ProjectRequestAttachment { ClientId = clientB.Id, FileName = "b.pdf", StoredPath = "b", ContentType = "application/pdf", Size = 1 }]
+                });
             await seed.SaveChangesAsync();
         }
 
@@ -217,6 +227,8 @@ public sealed class DomainAndIsolationTests
         Assert.Equal(["A notification"], await tenant.Notifications.Select(x => x.Message).ToListAsync());
         Assert.Equal([userA], await tenant.NotificationPreferences.Select(x => x.UserId).ToListAsync());
         Assert.Equal(["A"], await tenant.ActivityLogs.Select(x => x.Action).ToListAsync());
+        Assert.Equal(["A request"], await tenant.ProjectRequests.Select(x => x.Title).ToListAsync());
+        Assert.Equal(["a.pdf"], await tenant.ProjectRequestAttachments.Select(x => x.FileName).ToListAsync());
         Assert.False(await tenant.Projects.AnyAsync(x => x.Id == projectB.Id));
         Assert.False(await tenant.Invoices.AnyAsync(x => x.Id == invoiceB.Id));
 
@@ -226,6 +238,60 @@ public sealed class DomainAndIsolationTests
         Assert.Empty(await missingClientScope.Invitations.ToListAsync());
         Assert.Empty(await missingClientScope.Projects.ToListAsync());
         Assert.Empty(await missingClientScope.NotificationPreferences.ToListAsync());
+        Assert.Empty(await missingClientScope.ProjectRequests.ToListAsync());
+        Assert.Empty(await missingClientScope.ProjectRequestAttachments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ProjectRequestsEnforceStatusTransitionsNotesAndCancellationRules()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var client = new Client { CompanyName = "Request Client", Notes = "" };
+        var clientUser = new User
+        {
+            Email = "request-client@example.test", FullName = "Client User", Role = UserRole.Client,
+            ClientId = client.Id, PasswordHash = "hash"
+        };
+        var admin = new User
+        {
+            Email = "request-admin@example.test", FullName = "Admin", Role = UserRole.Admin,
+            PasswordHash = "hash"
+        };
+        var newRequest = new ProjectRequest
+        {
+            ClientId = client.Id, CreatedById = clientUser.Id, Title = "New work",
+            Description = "New work description"
+        };
+        var cancellableRequest = new ProjectRequest
+        {
+            ClientId = client.Id, CreatedById = clientUser.Id, Title = "Cancellable",
+            Description = "Cancellable description"
+        };
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(null, admin.Id, false));
+        await db.Database.EnsureCreatedAsync();
+        db.AddRange(client, clientUser, admin, newRequest, cancellableRequest);
+        await db.SaveChangesAsync();
+
+        var controller = new ProjectRequestsController(db, new UnusedFileStorage(),
+            new ClientHub.Api.Validators.ProjectRequestValidator());
+        SetAuthenticatedUser(controller, admin.Id, UserRole.Admin);
+        Assert.IsType<NoContentResult>(await controller.StartReview(newRequest.Id, CancellationToken.None));
+        Assert.Equal(ProjectRequestStatus.InReview, newRequest.Status);
+        Assert.Single(await db.Notifications.Where(notification => notification.UserId == clientUser.Id).ToListAsync());
+        Assert.IsType<BadRequestObjectResult>(await controller.Decide(newRequest.Id,
+            new ProjectRequestsController.AdminDecisionRequest("Accepted", " "), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.Decide(newRequest.Id,
+            new ProjectRequestsController.AdminDecisionRequest("Accepted", "We can begin next week."), CancellationToken.None));
+        Assert.Equal(ProjectRequestStatus.Accepted, newRequest.Status);
+        Assert.IsType<ConflictObjectResult>(await controller.Decide(newRequest.Id,
+            new ProjectRequestsController.AdminDecisionRequest("Declined", "No longer available."), CancellationToken.None));
+
+        SetAuthenticatedUser(controller, clientUser.Id, UserRole.Client, client.Id);
+        Assert.IsType<NoContentResult>(await controller.Cancel(cancellableRequest.Id, CancellationToken.None));
+        Assert.Equal(ProjectRequestStatus.Cancelled, cancellableRequest.Status);
+        Assert.IsType<ConflictObjectResult>(await controller.Cancel(newRequest.Id, CancellationToken.None));
     }
 
     [Fact]

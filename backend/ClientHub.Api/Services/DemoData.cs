@@ -103,6 +103,24 @@ public static class DemoData
                 new Milestone { ClientId = seedClientB.Id, ProjectId = projectB.Id, Title = "Recommendations", Order = 2, IsCompleted = true },
                 new Comment { ClientId = seedClientA.Id, ProjectId = projectA.Id, AuthorId = admin.Id, Body = "The first visual directions are ready for your review." },
                 new Comment { ClientId = seedClientB.Id, ProjectId = projectB.Id, AuthorId = userB.Id, Body = "Thanks, the recommendations look great." },
+                new ProjectRequest
+                {
+                    ClientId = seedClientA.Id, CreatedById = userA.Id, Title = "Campaign landing page",
+                    Description = "A focused page for the spring campaign.", Priority = ProjectRequestPriority.High,
+                    Status = ProjectRequestStatus.New
+                },
+                new ProjectRequest
+                {
+                    ClientId = seedClientA.Id, CreatedById = userA.Id, Title = "Quarterly content refresh",
+                    Description = "Refresh the core website content for the next quarter.", Priority = ProjectRequestPriority.Normal,
+                    Status = ProjectRequestStatus.InReview, AdminNote = "Reviewing scope and timing."
+                },
+                new ProjectRequest
+                {
+                    ClientId = seedClientB.Id, CreatedById = userB.Id, Title = "Operations workshop",
+                    Description = "Plan a workshop for the operations team.", Priority = ProjectRequestPriority.Low,
+                    Status = ProjectRequestStatus.Accepted, AdminNote = "We can schedule this next month."
+                },
                 new Payment
                 {
                     InvoiceId = invoiceB.Id, StripePaymentIntentId = "demo_payment_intent",

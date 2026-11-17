@@ -4,6 +4,8 @@ public enum UserRole { Admin, Client }
 public enum ProjectStatus { Pending, InProgress, InReview, Delivered, Archived }
 public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Void }
 public enum MilestoneApprovalStatus { NotRequired, Pending, Approved, ChangesRequested }
+public enum ProjectRequestPriority { Low, Normal, High }
+public enum ProjectRequestStatus { New, InReview, Accepted, Declined, Converted, Cancelled }
 
 public sealed class User
 {
@@ -44,6 +46,36 @@ public sealed class Project
     public ICollection<Milestone> Milestones { get; set; } = new List<Milestone>();
     public ICollection<ProjectFile> Files { get; set; } = new List<ProjectFile>();
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
+}
+
+public sealed class ProjectRequest
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ClientId { get; set; }
+    public Guid CreatedById { get; set; }
+    public required string Title { get; set; }
+    public required string Description { get; set; }
+    public ProjectRequestPriority Priority { get; set; } = ProjectRequestPriority.Normal;
+    public ProjectRequestStatus Status { get; set; } = ProjectRequestStatus.New;
+    public string? AdminNote { get; set; }
+    public Guid? ConvertedProjectId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Client? Client { get; set; }
+    public ICollection<ProjectRequestAttachment> Attachments { get; set; } = new List<ProjectRequestAttachment>();
+}
+
+public sealed class ProjectRequestAttachment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProjectRequestId { get; set; }
+    public Guid ClientId { get; set; }
+    public required string FileName { get; set; }
+    public required string StoredPath { get; set; }
+    public required string ContentType { get; set; }
+    public long Size { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    public ProjectRequest? ProjectRequest { get; set; }
 }
 
 public sealed class Milestone
