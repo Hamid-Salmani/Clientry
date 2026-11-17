@@ -32,6 +32,7 @@ type Comment = { id: string; body: string; createdAt: string; author: string }
 type ProjectFile = { id: string; fileName: string; contentType: string; size: number; uploadedAt: string }
 type NotificationItem = { id: string; type: string; message: string; isRead: boolean; createdAt: string }
 type NotificationPreferences = { workspaceUpdates: boolean; invoiceReminders: boolean }
+type AdminWorkspaceSettings = { name: string; supportEmail: string }
 
 const apiBase = import.meta.env.VITE_API_URL ?? ''
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? ''
@@ -100,6 +101,10 @@ function App() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [clients, setClients] = useState<{ id: string; companyName: string; contact?: string; activeProjects: number }[]>([])
+  const [workspaceSettings, setWorkspaceSettings] = useState<AdminWorkspaceSettings>({
+    name: 'Studio North',
+    supportEmail: 'support@studionorth.example',
+  })
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [comments, setComments] = useState<Comment[]>([])
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([])
@@ -111,7 +116,7 @@ function App() {
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const admin = user?.role === 'Admin'
-  const workspaceName = admin ? 'Studio North' : 'Northstar Studio'
+  const workspaceName = admin ? workspaceSettings.name : 'Northstar Studio'
   const changeTheme = (lightMode: boolean) => {
     const nextTheme = lightMode ? 'light' : 'dark'
     localStorage.setItem('clientry-theme', nextTheme)
@@ -159,12 +164,14 @@ function App() {
       setProjects(projectData.items)
       setInvoices(invoiceData)
       if (currentUser.role === 'Admin') {
-        const [dashboard, clientData] = await Promise.all([
+        const [dashboard, clientData, settings] = await Promise.all([
           request<Metrics>('/admin/dashboard', authToken),
           request<{ items: typeof clients }>('/admin/clients?page=1&pageSize=100', authToken),
+          request<AdminWorkspaceSettings>('/admin/workspace-settings', authToken),
         ])
         setMetrics(dashboard)
         setClients(clientData.items)
+        setWorkspaceSettings(settings)
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to load your workspace.')
@@ -256,6 +263,18 @@ function App() {
       setInvoiceReminders(next.invoiceReminders)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to save notification preferences.')
+    }
+  }
+
+  async function saveWorkspaceSettings(name: string, supportEmail: string) {
+    try {
+      await request<void>('/admin/workspace-settings', token, {
+        method: 'PUT',
+        body: JSON.stringify({ name, supportEmail }),
+      })
+      setWorkspaceSettings({ name, supportEmail })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to save workspace settings.')
     }
   }
 
@@ -415,7 +434,7 @@ function App() {
           ) : activePage === 'Invoices' ? (
             <Invoices invoices={invoices} token={token} />
           ) : activePage === 'Settings' ? (
-            <Settings workspaceName={workspaceName} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
+            <Settings workspaceName={workspaceName} admin={Boolean(admin)} workspaceSettings={workspaceSettings} onSaveWorkspaceSettings={(name, supportEmail) => void saveWorkspaceSettings(name, supportEmail)} lightMode={theme === 'light'} onLightModeChange={changeTheme} workspaceUpdates={workspaceUpdates} invoiceReminders={invoiceReminders} onWorkspaceUpdatesChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates: enabled, invoiceReminders })} onInvoiceRemindersChange={(enabled) => void saveNotificationPreferences({ workspaceUpdates, invoiceReminders: enabled })} />
           ) : activePage === 'Account' ? (
             <Account user={user} workspaceName={workspaceName} onSignOut={signOut} />
           ) : (
@@ -502,8 +521,11 @@ function NotificationsPopover({ items, unreadCount, loading, onMarkRead, onMarkA
   </div>
 }
 
-function Settings({ workspaceName, lightMode, onLightModeChange, workspaceUpdates, invoiceReminders, onWorkspaceUpdatesChange, onInvoiceRemindersChange }: {
+function Settings({ workspaceName, admin, workspaceSettings, onSaveWorkspaceSettings, lightMode, onLightModeChange, workspaceUpdates, invoiceReminders, onWorkspaceUpdatesChange, onInvoiceRemindersChange }: {
   workspaceName: string
+  admin: boolean
+  workspaceSettings: AdminWorkspaceSettings
+  onSaveWorkspaceSettings: (name: string, supportEmail: string) => void
   lightMode: boolean
   onLightModeChange: (enabled: boolean) => void
   workspaceUpdates: boolean
@@ -511,6 +533,12 @@ function Settings({ workspaceName, lightMode, onLightModeChange, workspaceUpdate
   onWorkspaceUpdatesChange: (enabled: boolean) => void
   onInvoiceRemindersChange: (enabled: boolean) => void
 }) {
+  const [name, setName] = useState(workspaceSettings.name)
+  const [supportEmail, setSupportEmail] = useState(workspaceSettings.supportEmail)
+  useEffect(() => {
+    setName(workspaceSettings.name)
+    setSupportEmail(workspaceSettings.supportEmail)
+  }, [workspaceSettings])
   return <div className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>Settings<span className="heading-period">.</span></h1><p>Choose how you’d like to use {workspaceName}.</p></div></div>
     <section className="panel settings-panel">
@@ -519,6 +547,12 @@ function Settings({ workspaceName, lightMode, onLightModeChange, workspaceUpdate
       <PreferenceToggle title="Workspace updates" description="Show project and activity updates in your notification menu." checked={workspaceUpdates} onChange={onWorkspaceUpdatesChange} />
       <PreferenceToggle title="Invoice reminders" description="Keep upcoming and overdue invoices on your radar." checked={invoiceReminders} onChange={onInvoiceRemindersChange} />
     </section>
+    {admin && <form className="panel settings-panel workspace-settings-form" onSubmit={(event) => { event.preventDefault(); onSaveWorkspaceSettings(name, supportEmail) }}>
+      <div className="panel-heading"><div><h2>Workspace details</h2><p>These details are shared across your client workspace.</p></div><span className="settings-badge">ADMIN</span></div>
+      <label className="form-field"><span>Workspace name</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></label>
+      <label className="form-field"><span>Support email</span><input type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} maxLength={254} required /></label>
+      <button className="primary-button" type="submit">Save workspace details <Icon name="arrow" /></button>
+    </form>}
     <section className="panel settings-workspace"><span className="workspace-avatar"><Icon name="building" /></span><div><strong>{workspaceName}</strong><span>Current workspace</span></div></section>
   </div>
 }

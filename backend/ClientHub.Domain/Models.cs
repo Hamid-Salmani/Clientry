@@ -138,6 +138,14 @@ public sealed class UserNotificationPreference
     public User? User { get; set; }
 }
 
+public sealed class WorkspaceSettings
+{
+    public int Id { get; set; } = 1;
+    public required string Name { get; set; }
+    public required string SupportEmail { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public sealed class ActivityLog
 {
     public Guid Id { get; set; } = Guid.NewGuid();

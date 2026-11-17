@@ -14,6 +14,37 @@ namespace ClientHub.Api.Controllers;
 [Route("api/admin")]
 public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSender, IConfiguration configuration) : ControllerBase
 {
+    [HttpGet("workspace-settings")]
+    public async Task<IActionResult> GetWorkspaceSettings(CancellationToken cancellationToken)
+    {
+        var settings = await db.WorkspaceSettings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+        return Ok(settings ?? new WorkspaceSettings { Name = "Studio North", SupportEmail = "support@studionorth.example" });
+    }
+
+    [HttpPut("workspace-settings")]
+    public async Task<IActionResult> UpdateWorkspaceSettings(WorkspaceSettingsRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 120)
+            return BadRequest(new { message = "A workspace name of at most 120 characters is required." });
+        if (!TryNormalizeEmail(request.SupportEmail, out var supportEmail))
+            return BadRequest(new { message = "A valid support email is required." });
+
+        var settings = await db.WorkspaceSettings.SingleOrDefaultAsync(x => x.Id == 1, cancellationToken);
+        if (settings is null)
+        {
+            settings = new WorkspaceSettings { Id = 1, Name = request.Name.Trim(), SupportEmail = supportEmail };
+            db.WorkspaceSettings.Add(settings);
+        }
+        else
+        {
+            settings.Name = request.Name.Trim();
+            settings.SupportEmail = supportEmail;
+            settings.UpdatedAt = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
     [HttpPost("clients/{clientId:guid}/invitations")]
     public async Task<IActionResult> InviteClientUser(Guid clientId, InvitationRequest request, CancellationToken cancellationToken)
     {
@@ -295,4 +326,5 @@ public sealed class AdminController(ClientHubDbContext db, IEmailSender emailSen
     public sealed record ClientRequest(string CompanyName, string Notes);
     public sealed record SetActiveRequest(bool IsActive);
     public sealed record InvitationRequest(string Email, string FullName);
+    public sealed record WorkspaceSettingsRequest(string Name, string SupportEmail);
 }

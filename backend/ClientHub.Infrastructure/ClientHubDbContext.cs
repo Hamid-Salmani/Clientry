@@ -21,6 +21,7 @@ public sealed class ClientHubDbContext(DbContextOptions<ClientHubDbContext> opti
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<UserNotificationPreference> NotificationPreferences => Set<UserNotificationPreference>();
+    public DbSet<WorkspaceSettings> WorkspaceSettings => Set<WorkspaceSettings>();
     public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

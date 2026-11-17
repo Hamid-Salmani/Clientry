@@ -492,6 +492,28 @@ namespace ClientHub.Infrastructure.Migrations
                     b.ToTable("NotificationPreferences");
                 });
 
+            modelBuilder.Entity("ClientHub.Domain.WorkspaceSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SupportEmail")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("WorkspaceSettings");
+                });
+
             modelBuilder.Entity("ClientHub.Domain.Comment", b =>
                 {
                     b.HasOne("ClientHub.Domain.User", "Author")

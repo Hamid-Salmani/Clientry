@@ -218,6 +218,12 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 .client-project-count { margin-right: 16px; }
 .settings-panel { max-width: 760px; padding: 19px; }
 .settings-panel .panel-heading { margin-bottom: 6px; }
+.workspace-settings-form { display: flex; flex-direction: column; gap: 12px; margin-top: 13px; }
+.workspace-settings-form .panel-heading { margin-bottom: 0; }
+.workspace-settings-form label { display: flex; flex-direction: column; gap: 6px; color: #656977; font-size: 9px; font-weight: 600; }
+.workspace-settings-form input { width: 100%; min-height: 36px; border: 1px solid #e8e9ef; border-radius: 6px; padding: 8px 9px; background: white; color: #4c5060; font-size: 10px; }
+.workspace-settings-form input:focus-visible { border-color: #898be0; outline: 3px solid #8183db1a; }
+.workspace-settings-form .primary-button { align-self: flex-start; }
 .settings-badge { border-radius: 5px; padding: 5px 7px; background: #f3f3fb; color: #7779c7; font-size: 7px; font-weight: 700; letter-spacing: .6px; }
 .preference-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid #f0f1f4; padding: 16px 1px; cursor: pointer; }
 .preference-row > span:first-child { display: flex; flex-direction: column; gap: 5px; }
@@ -434,6 +440,7 @@ h1 { color: #292d3a; font: 700 28px/1.2 'Manrope', sans-serif; letter-spacing: -
 :root[data-theme="dark"] .preference-row input:checked + .toggle-track { background: #8586df; }
 :root[data-theme="dark"] .settings-badge, :root[data-theme="dark"] .notification-count { background: #303149; color: #c0c1ff; }
 :root[data-theme="dark"] .settings-workspace { background: #20232e; }
+:root[data-theme="dark"] .workspace-settings-form input { border-color: #393d4b; background: #20232e; color: #d9dbe4; }
 :root[data-theme="dark"] .project-row, :root[data-theme="dark"] .login-form input, :root[data-theme="dark"] .comment-form textarea, :root[data-theme="dark"] .download-button, :root[data-theme="dark"] .upload-button, :root[data-theme="dark"] .cancel-button { background: #20232e; color: #d9dbe4; }
 :root[data-theme="dark"] .modal-close { background: #303442; color: #c4c7d1; }
 :root[data-theme="dark"] .login-page { color: #e4e6ed; }
