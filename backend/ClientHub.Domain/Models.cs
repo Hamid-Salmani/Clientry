@@ -1,8 +1,12 @@
 namespace ClientHub.Domain;
 
 public enum UserRole { Admin, Client }
+public enum ClientRole { Member, Owner }
 public enum ProjectStatus { Pending, InProgress, InReview, Delivered, Archived }
 public enum InvoiceStatus { Draft, Sent, Paid, Overdue, Void }
+public enum MilestoneApprovalStatus { NotRequired, Pending, Approved, ChangesRequested }
+public enum ProjectRequestPriority { Low, Normal, High }
+public enum ProjectRequestStatus { New, InReview, Accepted, Declined, Converted, Cancelled }
 
 public sealed class User
 {
@@ -11,11 +15,14 @@ public sealed class User
     public required string PasswordHash { get; set; }
     public required string FullName { get; set; }
     public UserRole Role { get; set; }
+    public ClientRole ClientRole { get; set; } = ClientRole.Member;
     public Guid? ClientId { get; set; }
     public bool IsActive { get; set; } = true;
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedUntil { get; set; }
+    public DateTime? LastVisitedAt { get; set; }
     public Client? Client { get; set; }
+    public UserNotificationPreference? NotificationPreference { get; set; }
 }
 
 public sealed class Client
@@ -23,6 +30,11 @@ public sealed class Client
     public Guid Id { get; set; } = Guid.NewGuid();
     public required string CompanyName { get; set; }
     public required string Notes { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string? LegalName { get; set; }
+    public string? TaxId { get; set; }
+    public string? BillingEmails { get; set; }
+    public string? BillingAddress { get; set; }
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<Project> Projects { get; set; } = new List<Project>();
     public ICollection<Invoice> Invoices { get; set; } = new List<Invoice>();
@@ -43,6 +55,36 @@ public sealed class Project
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
 }
 
+public sealed class ProjectRequest
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ClientId { get; set; }
+    public Guid CreatedById { get; set; }
+    public required string Title { get; set; }
+    public required string Description { get; set; }
+    public ProjectRequestPriority Priority { get; set; } = ProjectRequestPriority.Normal;
+    public ProjectRequestStatus Status { get; set; } = ProjectRequestStatus.New;
+    public string? AdminNote { get; set; }
+    public Guid? ConvertedProjectId { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Client? Client { get; set; }
+    public ICollection<ProjectRequestAttachment> Attachments { get; set; } = new List<ProjectRequestAttachment>();
+}
+
+public sealed class ProjectRequestAttachment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ProjectRequestId { get; set; }
+    public Guid ClientId { get; set; }
+    public required string FileName { get; set; }
+    public required string StoredPath { get; set; }
+    public required string ContentType { get; set; }
+    public long Size { get; set; }
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    public ProjectRequest? ProjectRequest { get; set; }
+}
+
 public sealed class Milestone
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -52,6 +94,11 @@ public sealed class Milestone
     public DateOnly? DueDate { get; set; }
     public bool IsCompleted { get; set; }
     public int Order { get; set; }
+    public MilestoneApprovalStatus ApprovalStatus { get; set; }
+    public DateTime? RequestedAt { get; set; }
+    public Guid? DecidedById { get; set; }
+    public DateTime? DecidedAt { get; set; }
+    public string? DecisionNote { get; set; }
     public Project? Project { get; set; }
 }
 
@@ -91,7 +138,12 @@ public sealed class Invoice
     public DateOnly DueDate { get; set; }
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
     public required string Currency { get; set; }
-    public decimal Total => Lines.Sum(x => x.Quantity * x.UnitPrice);
+    public decimal DiscountAmount { get; set; }
+    public decimal TaxAmount { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? SentAt { get; set; }
+    public DateTime? StatusChangedAt { get; set; }
+    public decimal Total => Math.Max(0, Lines.Sum(x => x.Quantity * x.UnitPrice) - DiscountAmount + TaxAmount);
     public Client? Client { get; set; }
     public ICollection<InvoiceLineItem> Lines { get; set; } = new List<InvoiceLineItem>();
     public ICollection<Payment> Payments { get; set; } = new List<Payment>();
@@ -124,8 +176,33 @@ public sealed class Notification
     public Guid UserId { get; set; }
     public required string Type { get; set; }
     public required string Message { get; set; }
+    public string? Link { get; set; }
     public bool IsRead { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class UserNotificationPreference
+{
+    public Guid UserId { get; set; }
+    public bool WorkspaceUpdates { get; set; } = true;
+    public bool InvoiceReminders { get; set; } = true;
+    public bool Comments { get; set; } = true;
+    public bool Approvals { get; set; } = true;
+    public bool RequestUpdates { get; set; } = true;
+    public bool EmailWorkspaceUpdates { get; set; } = true;
+    public bool EmailComments { get; set; } = true;
+    public bool EmailApprovals { get; set; } = true;
+    public bool EmailInvoiceReminders { get; set; } = true;
+    public bool EmailRequestUpdates { get; set; } = true;
+    public User? User { get; set; }
+}
+
+public sealed class WorkspaceSettings
+{
+    public int Id { get; set; } = 1;
+    public required string Name { get; set; }
+    public required string SupportEmail { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class ActivityLog
@@ -143,10 +220,32 @@ public sealed class Invitation
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public required string Email { get; set; }
+    public required string FullName { get; set; }
     public required string TokenHash { get; set; }
     public Guid ClientId { get; set; }
     public DateTime ExpiresAt { get; set; }
     public DateTime? AcceptedAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+}
+
+public sealed class RefreshToken
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public required string TokenHash { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public string? ReplacedByTokenHash { get; set; }
+}
+
+public sealed class PasswordResetToken
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public required string TokenHash { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? UsedAt { get; set; }
 }
 
 public static class InvoiceRules
@@ -159,4 +258,28 @@ public static class InvoiceRules
             (InvoiceStatus.Overdue, InvoiceStatus.Paid or InvoiceStatus.Void) => true,
             _ => current == next
         };
+}
+
+public static class ProjectRules
+{
+    public static bool CanTransition(ProjectStatus current, ProjectStatus next) =>
+        current == next ||
+        (current, next) switch
+        {
+            (ProjectStatus.Pending, ProjectStatus.InProgress or ProjectStatus.Archived) => true,
+            (ProjectStatus.InProgress, ProjectStatus.Pending or ProjectStatus.InReview or ProjectStatus.Archived) => true,
+            (ProjectStatus.InReview, ProjectStatus.InProgress or ProjectStatus.Delivered or ProjectStatus.Archived) => true,
+            (ProjectStatus.Delivered, ProjectStatus.InReview or ProjectStatus.Archived) => true,
+            (ProjectStatus.Archived, ProjectStatus.Delivered) => true,
+            _ => false
+        };
+}
+
+public static class MilestoneApprovalRules
+{
+    public static bool CanRequest(MilestoneApprovalStatus status, bool isCompleted) =>
+        !isCompleted && status != MilestoneApprovalStatus.Pending;
+
+    public static bool CanDecide(MilestoneApprovalStatus status) =>
+        status == MilestoneApprovalStatus.Pending;
 }

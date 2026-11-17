@@ -19,7 +19,11 @@ public static class DemoData
         await db.Database.MigrateAsync();
 
         var hasher = new PasswordHasher<User>();
-        var demoEmails = new[] { "admin@demo.com", "clienta@demo.com", "clientb@demo.com" };
+        var demoEmails = new[]
+        {
+            "admin@demo.com", "clienta@demo.com", "clientb@demo.com",
+            "clienta.member@demo.com", "clientb.member@demo.com"
+        };
         var demoUsers = await db.Users
             .Where(user => demoEmails.Contains(user.Email.ToLower()))
             .ToListAsync();
@@ -31,16 +35,33 @@ public static class DemoData
             user.FailedLoginAttempts = 0;
             user.LockedUntil = null;
             user.IsActive = true;
+            user.ClientRole = user.Email.ToLowerInvariant() is "clienta@demo.com" or "clientb@demo.com"
+                ? ClientRole.Owner
+                : ClientRole.Member;
         }
 
         if (!await db.Users.AnyAsync())
         {
-            var seedClientA = new Client { CompanyName = "Northstar Studio", Notes = "Brand and digital design partner" };
-            var seedClientB = new Client { CompanyName = "Juniper & Co.", Notes = "Advisory client" };
+            var seedClientA = new Client
+            {
+                CompanyName = "Northstar Studio", Notes = "Brand and digital design partner",
+                LegalName = "Northstar Studio LLC", BillingEmails = "billing@northstar.example",
+                BillingAddress = "100 Market Street, San Francisco, CA"
+            };
+            var seedClientB = new Client
+            {
+                CompanyName = "Juniper & Co.", Notes = "Advisory client",
+                LegalName = "Juniper and Company", TaxId = "DEMO-2048",
+                BillingEmails = "accounts@juniper.example", BillingAddress = "22 Pine Avenue, Portland, OR"
+            };
 
             User NewUser(string email, string name, UserRole role, Guid? clientId)
             {
-                var user = new User { Email = email, FullName = name, Role = role, ClientId = clientId, PasswordHash = string.Empty };
+                var user = new User
+                {
+                    Email = email, FullName = name, Role = role, ClientId = clientId, PasswordHash = string.Empty,
+                    ClientRole = role == UserRole.Client ? ClientRole.Owner : ClientRole.Member
+                };
                 user.PasswordHash = hasher.HashPassword(user, DemoPassword);
                 return user;
             }
@@ -48,6 +69,10 @@ public static class DemoData
             var admin = NewUser("admin@demo.com", "Alex Morgan", UserRole.Admin, null);
             var userA = NewUser("clienta@demo.com", "Mia Chen", UserRole.Client, seedClientA.Id);
             var userB = NewUser("clientb@demo.com", "Noah Patel", UserRole.Client, seedClientB.Id);
+            var userAMember = NewUser("clienta.member@demo.com", "Jordan Lee", UserRole.Client, seedClientA.Id);
+            var userBMember = NewUser("clientb.member@demo.com", "Taylor Kim", UserRole.Client, seedClientB.Id);
+            userA.ClientRole = ClientRole.Owner;
+            userB.ClientRole = ClientRole.Owner;
             var projectA = new Project
             {
                 ClientId = seedClientA.Id, Name = "Brand identity refresh",
@@ -67,6 +92,9 @@ public static class DemoData
                 ClientId = seedClientA.Id, ProjectId = projectA.Id, Number = "INV-2026-001",
                 IssueDate = new DateOnly(2026, 10, 5), DueDate = new DateOnly(2026, 11, 30),
                 Status = InvoiceStatus.Sent, Currency = "USD",
+                CreatedAt = new DateTime(2026, 10, 5, 10, 0, 0, DateTimeKind.Utc),
+                SentAt = new DateTime(2026, 10, 6, 10, 0, 0, DateTimeKind.Utc),
+                StatusChangedAt = new DateTime(2026, 10, 6, 10, 0, 0, DateTimeKind.Utc),
                 Lines = [new InvoiceLineItem { Description = "Identity design — phase 1", Quantity = 1, UnitPrice = 2400 }]
             };
             var invoiceB = new Invoice
@@ -74,23 +102,62 @@ public static class DemoData
                 ClientId = seedClientB.Id, ProjectId = projectB.Id, Number = "INV-2026-002",
                 IssueDate = new DateOnly(2026, 10, 1), DueDate = new DateOnly(2026, 10, 31),
                 Status = InvoiceStatus.Paid, Currency = "USD",
+                CreatedAt = new DateTime(2026, 10, 1, 10, 0, 0, DateTimeKind.Utc),
+                SentAt = new DateTime(2026, 10, 2, 10, 0, 0, DateTimeKind.Utc),
+                StatusChangedAt = new DateTime(2026, 11, 3, 10, 0, 0, DateTimeKind.Utc),
                 Lines = [new InvoiceLineItem { Description = "October advisory", Quantity = 8, UnitPrice = 180 }]
             };
-            db.AddRange(seedClientA, seedClientB, admin, userA, userB, projectA, projectB, invoiceA, invoiceB,
+            db.AddRange(seedClientA, seedClientB, admin, userA, userB, userAMember, userBMember, projectA, projectB, invoiceA, invoiceB,
                 new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Discovery & strategy", Order = 1, IsCompleted = true },
-                new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Visual directions", Order = 2, IsCompleted = true },
-                new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Identity system", Order = 3 },
-                new Milestone { ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Brand guidelines", Order = 4 },
+                new Milestone
+                {
+                    ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Visual directions", Order = 2,
+                    IsCompleted = true, ApprovalStatus = MilestoneApprovalStatus.Approved,
+                    RequestedAt = new DateTime(2026, 10, 20, 10, 0, 0, DateTimeKind.Utc),
+                    DecidedById = userA.Id, DecidedAt = new DateTime(2026, 10, 21, 10, 0, 0, DateTimeKind.Utc)
+                },
+                new Milestone
+                {
+                    ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Identity system", Order = 3,
+                    ApprovalStatus = MilestoneApprovalStatus.Pending,
+                    RequestedAt = new DateTime(2026, 11, 16, 10, 0, 0, DateTimeKind.Utc)
+                },
+                new Milestone
+                {
+                    ClientId = seedClientA.Id, ProjectId = projectA.Id, Title = "Brand guidelines", Order = 4,
+                    ApprovalStatus = MilestoneApprovalStatus.ChangesRequested,
+                    RequestedAt = new DateTime(2026, 10, 28, 10, 0, 0, DateTimeKind.Utc),
+                    DecidedById = userA.Id, DecidedAt = new DateTime(2026, 10, 29, 10, 0, 0, DateTimeKind.Utc),
+                    DecisionNote = "Please include the accessible color contrast variations."
+                },
                 new Milestone { ClientId = seedClientB.Id, ProjectId = projectB.Id, Title = "Operations review", Order = 1, IsCompleted = true },
                 new Milestone { ClientId = seedClientB.Id, ProjectId = projectB.Id, Title = "Recommendations", Order = 2, IsCompleted = true },
                 new Comment { ClientId = seedClientA.Id, ProjectId = projectA.Id, AuthorId = admin.Id, Body = "The first visual directions are ready for your review." },
                 new Comment { ClientId = seedClientB.Id, ProjectId = projectB.Id, AuthorId = userB.Id, Body = "Thanks, the recommendations look great." },
+                new ProjectRequest
+                {
+                    ClientId = seedClientA.Id, CreatedById = userA.Id, Title = "Campaign landing page",
+                    Description = "A focused page for the spring campaign.", Priority = ProjectRequestPriority.High,
+                    Status = ProjectRequestStatus.New
+                },
+                new ProjectRequest
+                {
+                    ClientId = seedClientA.Id, CreatedById = userA.Id, Title = "Quarterly content refresh",
+                    Description = "Refresh the core website content for the next quarter.", Priority = ProjectRequestPriority.Normal,
+                    Status = ProjectRequestStatus.InReview, AdminNote = "Reviewing scope and timing."
+                },
+                new ProjectRequest
+                {
+                    ClientId = seedClientB.Id, CreatedById = userB.Id, Title = "Operations workshop",
+                    Description = "Plan a workshop for the operations team.", Priority = ProjectRequestPriority.Low,
+                    Status = ProjectRequestStatus.Accepted, AdminNote = "We can schedule this next month."
+                },
                 new Payment
                 {
                     InvoiceId = invoiceB.Id, StripePaymentIntentId = "demo_payment_intent",
                     Amount = 1440, Status = "Succeeded", PaidAt = new DateTime(2026, 11, 3, 10, 0, 0, DateTimeKind.Utc)
                 },
-                new Notification { UserId = userA.Id, Type = "project", Message = "Visual directions are ready for review." },
+                new Notification { UserId = userA.Id, Type = "project", Message = "Visual directions are ready for review.", Link = $"/projects/{projectA.Id}" },
                 new ActivityLog { ClientId = seedClientA.Id, ProjectId = projectA.Id, ActorId = admin.Id, Action = "Project created", Metadata = "Brand identity refresh" });
 
             var sampleContent = Encoding.UTF8.GetBytes("ClientHub shared project brief\r\nA short sample file for the demo workspace.\r\n");
@@ -117,12 +184,6 @@ public static class DemoData
             .Where(email => !demoUsers.Any(user => string.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
-        if (missingDemoEmails.Length == 0)
-        {
-            await db.SaveChangesAsync();
-            return;
-        }
-
         var clientA = await db.Clients.FirstOrDefaultAsync(client => client.CompanyName == "Northstar Studio") ?? new Client { CompanyName = "Northstar Studio", Notes = "Brand and digital design partner" };
         var clientB = await db.Clients.FirstOrDefaultAsync(client => client.CompanyName == "Juniper & Co.") ?? new Client { CompanyName = "Juniper & Co.", Notes = "Advisory client" };
 
@@ -130,6 +191,15 @@ public static class DemoData
             db.Clients.Add(clientA);
         if (!db.Clients.Any(client => client.Id == clientB.Id))
             db.Clients.Add(clientB);
+
+        foreach (var user in demoUsers.Where(user => user.Role == UserRole.Client))
+        {
+            var email = user.Email.ToLowerInvariant();
+            if (email is "clienta@demo.com" or "clienta.member@demo.com")
+                user.ClientId = clientA.Id;
+            else if (email is "clientb@demo.com" or "clientb.member@demo.com")
+                user.ClientId = clientB.Id;
+        }
 
         User CreateMissingUser(string email, string fullName, UserRole role, Guid? clientId)
         {
@@ -139,6 +209,9 @@ public static class DemoData
                 FullName = fullName,
                 Role = role,
                 ClientId = clientId,
+                ClientRole = email.ToLowerInvariant() is "clienta@demo.com" or "clientb@demo.com"
+                    ? ClientRole.Owner
+                    : ClientRole.Member,
                 PasswordHash = string.Empty,
                 IsActive = true
             };
@@ -153,6 +226,10 @@ public static class DemoData
             CreateMissingUser("clienta@demo.com", "Mia Chen", UserRole.Client, clientA.Id);
         if (missingDemoEmails.Contains("clientb@demo.com", StringComparer.OrdinalIgnoreCase))
             CreateMissingUser("clientb@demo.com", "Noah Patel", UserRole.Client, clientB.Id);
+        if (missingDemoEmails.Contains("clienta.member@demo.com", StringComparer.OrdinalIgnoreCase))
+            CreateMissingUser("clienta.member@demo.com", "Jordan Lee", UserRole.Client, clientA.Id);
+        if (missingDemoEmails.Contains("clientb.member@demo.com", StringComparer.OrdinalIgnoreCase))
+            CreateMissingUser("clientb.member@demo.com", "Taylor Kim", UserRole.Client, clientB.Id);
 
         await db.SaveChangesAsync();
     }

@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.IO.Compression;
+using System.Text;
 using ClientHub.Application;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
@@ -14,6 +16,7 @@ namespace ClientHub.Api.Controllers;
 public sealed class FilesController(ClientHubDbContext db, IFileStorage storage) : ControllerBase
 {
     private const long MaxFileSize = 10 * 1024 * 1024;
+    private const long MaxZipSize = 50 * 1024 * 1024;
     private static readonly IReadOnlyDictionary<string, string> AllowedTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         [".pdf"] = "application/pdf",
@@ -24,12 +27,29 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
     };
 
     [HttpGet]
-    public async Task<IActionResult> List(Guid projectId, CancellationToken cancellationToken)
+    public async Task<IActionResult> List(Guid projectId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null, CancellationToken cancellationToken = default)
     {
         if (!await db.Projects.AnyAsync(x => x.Id == projectId, cancellationToken)) return NotFound();
-        return Ok(await db.ProjectFiles.AsNoTracking().Where(x => x.ProjectId == projectId)
-            .OrderByDescending(x => x.UploadedAt)
-            .Select(x => new { x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt }).ToListAsync(cancellationToken));
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = db.ProjectFiles.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLowerInvariant();
+            query = query.Where(file => file.FileName.ToLower().Contains(term));
+        }
+        var total = await query.CountAsync(cancellationToken);
+        var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
+        var items = await query.OrderByDescending(x => x.UploadedAt).ThenBy(x => x.Id)
+            .Skip(skip).Take(pageSize)
+            .Select(x => new
+            {
+                x.Id, x.FileName, x.ContentType, x.Size, x.UploadedAt, x.UploadedById,
+                uploadedByRole = db.Users.Where(user => user.Id == x.UploadedById)
+                    .Select(user => user.Role.ToString()).SingleOrDefault()
+            }).ToListAsync(cancellationToken);
+        return Ok(new PagedResult<object>(items.Cast<object>().ToArray(), total, page, pageSize));
     }
 
     [HttpPost]
@@ -51,6 +71,9 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         input.Position = 0;
         if (!HasValidSignature(extension, header, read))
             return BadRequest(new { message = "The file contents do not match the selected type." });
+        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) && !HasValidTextContent(input))
+            return BadRequest(new { message = "Text files must contain valid UTF-8 text without binary control characters." });
+        input.Position = 0;
 
         var storedPath = await storage.SaveAsync(input, cancellationToken);
         if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
@@ -64,6 +87,12 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             StoredPath = storedPath, ContentType = expectedType, Size = file.Length, UploadedById = userId
         };
         db.ProjectFiles.Add(entity);
+        db.ActivityLogs.Add(new ActivityLog
+        {
+            ProjectId = projectId, ClientId = project.ClientId, ActorId = userId,
+            Action = "File uploaded", Metadata = entity.FileName
+        });
+        await AddWorkspaceNotificationsAsync(project.ClientId, projectId, userId, $"File shared: {entity.FileName}", cancellationToken);
         try { await db.SaveChangesAsync(cancellationToken); }
         catch
         {
@@ -71,6 +100,53 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
             throw;
         }
         return CreatedAtAction(nameof(List), new { projectId }, new { entity.Id, entity.FileName });
+    }
+
+    [HttpPatch("{fileId:guid}")]
+    public async Task<IActionResult> Rename(Guid projectId, Guid fileId, RenameFileRequest request, CancellationToken cancellationToken)
+    {
+        var file = await db.ProjectFiles.SingleOrDefaultAsync(
+            x => x.Id == fileId && x.ProjectId == projectId, cancellationToken);
+        if (file is null) return NotFound();
+        if (!CanManageFile(file.UploadedById)) return Forbid();
+        var fileName = Path.GetFileName(request.FileName?.Trim());
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Length > 255 ||
+            !AllowedTypes.TryGetValue(Path.GetExtension(fileName), out var expectedType) ||
+            !string.Equals(expectedType, file.ContentType, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Provide a valid file name with its original file type." });
+
+        var previousName = file.FileName;
+        file.FileName = fileName;
+        db.ActivityLogs.Add(new ActivityLog
+        {
+            ProjectId = projectId, ClientId = file.ClientId, ActorId = GetActorId(),
+            Action = "File renamed", Metadata = $"{previousName} to {fileName}"
+        });
+        var actorId = GetActorId();
+        await AddWorkspaceNotificationsAsync(file.ClientId, projectId, actorId, $"File renamed: {fileName}", cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("{fileId:guid}")]
+    public async Task<IActionResult> Delete(Guid projectId, Guid fileId, CancellationToken cancellationToken)
+    {
+        var file = await db.ProjectFiles.SingleOrDefaultAsync(
+            x => x.Id == fileId && x.ProjectId == projectId, cancellationToken);
+        if (file is null) return NotFound();
+        if (!CanManageFile(file.UploadedById)) return Forbid();
+        var storedPath = file.StoredPath;
+        db.ProjectFiles.Remove(file);
+        db.ActivityLogs.Add(new ActivityLog
+        {
+            ProjectId = projectId, ClientId = file.ClientId, ActorId = GetActorId(),
+            Action = "File deleted", Metadata = file.FileName
+        });
+        var actorId = GetActorId();
+        await AddWorkspaceNotificationsAsync(file.ClientId, projectId, actorId, $"File removed: {file.FileName}", cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        await storage.DeleteAsync(storedPath, cancellationToken);
+        return NoContent();
     }
 
     [HttpGet("{fileId:guid}")]
@@ -90,6 +166,89 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         }
     }
 
+    [HttpGet("{fileId:guid}/preview")]
+    public async Task<IActionResult> Preview(Guid projectId, Guid fileId, CancellationToken cancellationToken)
+    {
+        var file = await db.ProjectFiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == fileId && x.ProjectId == projectId, cancellationToken);
+        if (file is null) return NotFound();
+        if (file.ContentType is not ("image/png" or "image/jpeg" or "application/pdf"))
+            return BadRequest(new { message = "Only PNG, JPEG, and PDF files can be previewed." });
+        try
+        {
+            var stream = await storage.OpenReadAsync(file.StoredPath, cancellationToken);
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
+            Response.Headers.ContentDisposition = "inline";
+            return File(stream, file.ContentType);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpGet("/api/projects/{projectId:guid}/files.zip")]
+    public async Task<IActionResult> DownloadZip(Guid projectId, CancellationToken cancellationToken)
+    {
+        if (!await db.Projects.AnyAsync(project => project.Id == projectId, cancellationToken))
+            return NotFound();
+        var files = await db.ProjectFiles.AsNoTracking().Where(file => file.ProjectId == projectId)
+            .OrderBy(file => file.UploadedAt).Select(file => new
+            {
+                file.FileName, file.StoredPath, file.Size
+            }).ToListAsync(cancellationToken);
+        if (files.Sum(file => file.Size) > MaxZipSize)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new { message = "The project's files exceed the 50 MB archive limit." });
+
+        var archiveStream = new MemoryStream();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long copiedBytes = 0;
+        try
+        {
+            using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var file in files)
+                {
+                    var entryName = CreateUniqueEntryName(file.FileName, usedNames);
+                    var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                    await using var source = await storage.OpenReadAsync(file.StoredPath, cancellationToken);
+                    await using var destination = entry.Open();
+                    var buffer = new byte[81920];
+                    int read;
+                    while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
+                    {
+                        copiedBytes += read;
+                        if (copiedBytes > MaxZipSize)
+                            return StatusCode(StatusCodes.Status413PayloadTooLarge, new { message = "The project's files exceed the 50 MB archive limit." });
+                        await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    }
+                }
+            }
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+        archiveStream.Position = 0;
+        return File(archiveStream, "application/zip", $"project-{projectId:N}-files.zip");
+    }
+
+    private static string CreateUniqueEntryName(string fileName, HashSet<string> usedNames)
+    {
+        var name = fileName.Replace('\\', '/').Split('/').LastOrDefault()?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name is "." or "..") name = "file";
+        var invalidCharacters = new HashSet<char>(Path.GetInvalidFileNameChars().Concat("<>:\"|?*"));
+        name = new string(name.Select(character =>
+            char.IsControl(character) || invalidCharacters.Contains(character) ? '_' : character).ToArray()).Trim('.', ' ');
+        if (string.IsNullOrWhiteSpace(name)) name = "file";
+        var extension = Path.GetExtension(name);
+        var stem = Path.GetFileNameWithoutExtension(name);
+        var uniqueName = name;
+        for (var suffix = 2; !usedNames.Add(uniqueName); suffix++)
+            uniqueName = $"{stem} ({suffix}){extension}";
+        return uniqueName;
+    }
+
     private static bool HasValidSignature(string extension, byte[] header, int read) => extension.ToLowerInvariant() switch
     {
         ".pdf" => read >= 5 && header.AsSpan(0, 5).SequenceEqual("%PDF-"u8),
@@ -98,4 +257,49 @@ public sealed class FilesController(ClientHubDbContext db, IFileStorage storage)
         ".txt" => read >= 0,
         _ => false
     };
+
+    private static bool HasValidTextContent(Stream input)
+    {
+        try
+        {
+            using var reader = new StreamReader(input, new UTF8Encoding(false, true),
+                detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            var content = reader.ReadToEnd();
+            return !content.Any(character =>
+                char.IsControl(character) && character is not ('\r' or '\n' or '\t'));
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+        finally
+        {
+            input.Position = 0;
+        }
+    }
+
+    private bool CanManageFile(Guid uploadedById) =>
+        User.IsInRole("Admin") || Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) && userId == uploadedById;
+
+    private Guid GetActorId() =>
+        Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+            ? userId
+            : throw new InvalidOperationException("The authenticated user identifier is missing.");
+
+    private async Task AddWorkspaceNotificationsAsync(Guid clientId, Guid projectId, Guid actorId, string message, CancellationToken cancellationToken)
+    {
+        var recipientIds = await db.Users.IgnoreQueryFilters()
+            .Where(user => user.ClientId == clientId && user.IsActive && user.Id != actorId)
+            .Select(user => user.Id).ToListAsync(cancellationToken);
+        var optedOutIds = await db.NotificationPreferences.IgnoreQueryFilters()
+            .Where(preference => recipientIds.Contains(preference.UserId) && !preference.WorkspaceUpdates)
+            .Select(preference => preference.UserId).ToListAsync(cancellationToken);
+        foreach (var recipientId in recipientIds.Except(optedOutIds))
+            db.Notifications.Add(new Notification
+            {
+                UserId = recipientId, Type = "Project update", Message = message, Link = $"/projects/{projectId}"
+            });
+    }
+
+    public sealed record RenameFileRequest(string FileName);
 }

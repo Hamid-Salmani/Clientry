@@ -45,7 +45,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ActivityLogs");
+                    b.ToTable("ActivityLogs", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Client", b =>
@@ -54,17 +54,32 @@ namespace ClientHub.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BillingAddress")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BillingEmails")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CompanyName")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LegalName")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TaxId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
-                    b.ToTable("Clients");
+                    b.ToTable("Clients", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Comment", b =>
@@ -95,7 +110,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("Comments");
+                    b.ToTable("Comments", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Invitation", b =>
@@ -117,13 +132,23 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("TokenHash")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.ToTable("Invitations");
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("Invitations", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Invoice", b =>
@@ -135,8 +160,14 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<Guid>("ClientId")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Currency")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("DiscountAmount")
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly>("DueDate")
@@ -152,14 +183,23 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("StatusChangedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TaxAmount")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId");
 
-                    b.ToTable("Invoices");
+                    b.ToTable("Invoices", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.InvoiceLineItem", b =>
@@ -187,7 +227,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("InvoiceId");
 
-                    b.ToTable("InvoiceLineItems");
+                    b.ToTable("InvoiceLineItems", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Milestone", b =>
@@ -196,7 +236,19 @@ namespace ClientHub.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ApprovalStatus")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DecidedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DecisionNote")
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly?>("DueDate")
@@ -211,6 +263,9 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("RequestedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -219,7 +274,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("Milestones");
+                    b.ToTable("Milestones", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Notification", b =>
@@ -234,6 +289,9 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Property<bool>("IsRead")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Link")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -247,7 +305,36 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Notifications");
+                    b.ToTable("Notifications", (string)null);
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.PasswordResetToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("PasswordResetTokens", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Payment", b =>
@@ -280,7 +367,7 @@ namespace ClientHub.Infrastructure.Migrations
                     b.HasIndex("StripePaymentIntentId")
                         .IsUnique();
 
-                    b.ToTable("Payments");
+                    b.ToTable("Payments", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Project", b =>
@@ -313,7 +400,7 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ClientId");
 
-                    b.ToTable("Projects");
+                    b.ToTable("Projects", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.ProjectFile", b =>
@@ -353,7 +440,124 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("ProjectFiles");
+                    b.ToTable("ProjectFiles", (string)null);
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdminNote")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ConvertedProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "CreatedAt");
+
+                    b.ToTable("ProjectRequests", (string)null);
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequestAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectRequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StoredPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectRequestId");
+
+                    b.ToTable("ProjectRequestAttachments", (string)null);
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReplacedByTokenHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RefreshTokens", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.User", b =>
@@ -364,6 +568,11 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.Property<Guid?>("ClientId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("ClientRole")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
 
                     b.Property<string>("Email")
                         .IsRequired()
@@ -378,6 +587,9 @@ namespace ClientHub.Infrastructure.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastVisitedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LockedUntil")
                         .HasColumnType("TEXT");
@@ -396,7 +608,85 @@ namespace ClientHub.Infrastructure.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.UserNotificationPreference", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Approvals")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("Comments")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailApprovals")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailComments")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailInvoiceReminders")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailRequestUpdates")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("EmailWorkspaceUpdates")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("InvoiceReminders")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RequestUpdates")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("WorkspaceUpdates")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("NotificationPreferences", (string)null);
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.WorkspaceSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SupportEmail")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("WorkspaceSettings", (string)null);
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Comment", b =>
@@ -451,6 +741,15 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("ClientHub.Domain.PasswordResetToken", b =>
+                {
+                    b.HasOne("ClientHub.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ClientHub.Domain.Payment", b =>
                 {
                     b.HasOne("ClientHub.Domain.Invoice", "Invoice")
@@ -484,6 +783,37 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequest", b =>
+                {
+                    b.HasOne("ClientHub.Domain.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequestAttachment", b =>
+                {
+                    b.HasOne("ClientHub.Domain.ProjectRequest", "ProjectRequest")
+                        .WithMany("Attachments")
+                        .HasForeignKey("ProjectRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ProjectRequest");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.RefreshToken", b =>
+                {
+                    b.HasOne("ClientHub.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ClientHub.Domain.User", b =>
                 {
                     b.HasOne("ClientHub.Domain.Client", "Client")
@@ -492,6 +822,17 @@ namespace ClientHub.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.UserNotificationPreference", b =>
+                {
+                    b.HasOne("ClientHub.Domain.User", "User")
+                        .WithOne("NotificationPreference")
+                        .HasForeignKey("ClientHub.Domain.UserNotificationPreference", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("ClientHub.Domain.Client", b =>
@@ -517,6 +858,16 @@ namespace ClientHub.Infrastructure.Migrations
                     b.Navigation("Files");
 
                     b.Navigation("Milestones");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.ProjectRequest", b =>
+                {
+                    b.Navigation("Attachments");
+                });
+
+            modelBuilder.Entity("ClientHub.Domain.User", b =>
+                {
+                    b.Navigation("NotificationPreference");
                 });
 #pragma warning restore 612, 618
         }
