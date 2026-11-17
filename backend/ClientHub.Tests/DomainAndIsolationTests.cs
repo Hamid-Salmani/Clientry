@@ -4,6 +4,7 @@ using ClientHub.Api.Services;
 using ClientHub.Domain;
 using ClientHub.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
@@ -12,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Security.Claims;
 
 namespace ClientHub.Tests;
 
@@ -358,6 +360,73 @@ public sealed class DomainAndIsolationTests
         Assert.Single(page.Items);
         Assert.Equal(1, page.Page);
         Assert.Equal(1, page.PageSize);
+    }
+
+    [Fact]
+    public async Task NotificationsAreUserScopedAndPreferencesPersist()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        await db.Database.EnsureCreatedAsync();
+        var userId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var ownNotification = new Notification { UserId = userId, Type = "Project", Message = "Project updated" };
+        var privateNotification = new Notification { UserId = otherUserId, Type = "Invoice", Message = "Invoice ready" };
+        db.Users.AddRange(
+            new User { Id = userId, Email = "notify@example.test", FullName = "Notify User", Role = UserRole.Admin, PasswordHash = "hash" },
+            new User { Id = otherUserId, Email = "other-notify@example.test", FullName = "Other User", Role = UserRole.Admin, PasswordHash = "hash" });
+        db.Notifications.AddRange(ownNotification, privateNotification);
+        await db.SaveChangesAsync();
+
+        var controller = new NotificationsController(db);
+        SetAuthenticatedUser(controller, userId);
+        var listResult = Assert.IsType<OkObjectResult>(
+            await controller.List(1, 1, null, CancellationToken.None));
+        var page = Assert.IsType<NotificationsController.NotificationsPage>(listResult.Value);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(1, page.UnreadCount);
+        Assert.Single(page.Items);
+        Assert.IsType<NotFoundResult>(await controller.MarkRead(privateNotification.Id, CancellationToken.None));
+        Assert.False(await db.Notifications.Where(item => item.Id == privateNotification.Id).Select(item => item.IsRead).SingleAsync());
+
+        Assert.IsType<NoContentResult>(await controller.MarkRead(ownNotification.Id, CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.UpdatePreferences(
+            new NotificationsController.NotificationPreferencesRequest(false, true), CancellationToken.None));
+        var preferences = await db.NotificationPreferences.SingleAsync(item => item.UserId == userId);
+        Assert.False(preferences.WorkspaceUpdates);
+        Assert.True(preferences.InvoiceReminders);
+    }
+
+    [Fact]
+    public async Task WorkspaceSettingsRejectInvalidEmailAndPersistNormalizedValues()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ClientHubDbContext>().UseSqlite(connection).Options;
+        await using var db = new ClientHubDbContext(options, new TestScope(null, null, false));
+        await db.Database.EnsureCreatedAsync();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        var controller = new AdminController(db, new UnusedEmailSender(), configuration);
+
+        Assert.IsType<BadRequestObjectResult>(await controller.UpdateWorkspaceSettings(
+            new AdminController.WorkspaceSettingsRequest("North Studio", "invalid address"), CancellationToken.None));
+        Assert.IsType<NoContentResult>(await controller.UpdateWorkspaceSettings(
+            new AdminController.WorkspaceSettingsRequest("  North Studio  ", "SUPPORT@EXAMPLE.COM"), CancellationToken.None));
+        var saved = await db.WorkspaceSettings.SingleAsync();
+        Assert.Equal("North Studio", saved.Name);
+        Assert.Equal("support@example.com", saved.SupportEmail);
+    }
+
+    private static void SetAuthenticatedUser(ControllerBase controller, Guid userId)
+    {
+        var identity = new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "test");
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+        };
     }
 
     private static AuthController CreateAuthController(ClientHubDbContext db)
